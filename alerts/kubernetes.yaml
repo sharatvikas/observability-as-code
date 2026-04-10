@@ -1,0 +1,188 @@
+groups:
+  - name: kubernetes.pods
+    interval: 30s
+    rules:
+      - alert: PodCrashLoopBackOff
+        expr: |
+          rate(kube_pod_container_status_restarts_total[15m]) * 60 > 1
+        for: 5m
+        labels:
+          severity: warning
+          category: kubernetes
+        annotations:
+          summary: "Pod {{ $labels.pod }} is crash-looping in {{ $labels.namespace }}"
+          description: >
+            Pod {{ $labels.namespace }}/{{ $labels.pod }} container {{ $labels.container }}
+            is restarting {{ $value | humanize }} times/minute.
+          runbook: "https://runbooks.internal/k8s/crashloop"
+          dashboard: "https://grafana.internal/d/kubernetes-pods"
+
+      - alert: PodOOMKilled
+        expr: |
+          kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+        for: 0m
+        labels:
+          severity: warning
+          category: kubernetes
+        annotations:
+          summary: "Pod {{ $labels.pod }} was OOMKilled"
+          description: >
+            Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }}
+            was killed due to out-of-memory. Review memory limits and JVM/app settings.
+          runbook: "https://runbooks.internal/k8s/oomkill"
+
+      - alert: PodNotReady
+        expr: |
+          sum by (namespace, pod) (
+            kube_pod_status_phase{phase=~"Pending|Unknown"} == 1
+          ) > 0
+        for: 15m
+        labels:
+          severity: warning
+          category: kubernetes
+        annotations:
+          summary: "Pod {{ $labels.pod }} stuck in {{ $labels.phase }}"
+          description: >
+            Pod {{ $labels.namespace }}/{{ $labels.pod }} has been in {{ $labels.phase }}
+            state for more than 15 minutes.
+          runbook: "https://runbooks.internal/k8s/pending-pod"
+
+      - alert: PodImagePullBackOff
+        expr: |
+          kube_pod_container_status_waiting_reason{reason=~"ImagePullBackOff|ErrImagePull"} == 1
+        for: 5m
+        labels:
+          severity: warning
+          category: kubernetes
+        annotations:
+          summary: "Pod {{ $labels.pod }} cannot pull image"
+          description: >
+            Container {{ $labels.container }} in {{ $labels.namespace }}/{{ $labels.pod }}
+            is failing to pull its image. Check ECR credentials, image tag, and registry access.
+          runbook: "https://runbooks.internal/k8s/image-pull"
+
+  - name: kubernetes.deployments
+    interval: 60s
+    rules:
+      - alert: DeploymentReplicasMismatch
+        expr: |
+          (
+            kube_deployment_spec_replicas
+            != kube_deployment_status_available_replicas
+          ) and (
+            changes(kube_deployment_status_replicas_updated[10m]) == 0
+          )
+        for: 15m
+        labels:
+          severity: warning
+          category: kubernetes
+        annotations:
+          summary: "Deployment {{ $labels.deployment }} has mismatched replicas"
+          description: >
+            Deployment {{ $labels.namespace }}/{{ $labels.deployment }} wants
+            {{ $value }} replicas but has fewer available for 15+ minutes.
+          runbook: "https://runbooks.internal/k8s/replica-mismatch"
+
+      - alert: DeploymentRolloutStuck
+        expr: |
+          kube_deployment_status_condition{condition="Progressing", status="false"} == 1
+        for: 15m
+        labels:
+          severity: critical
+          category: kubernetes
+        annotations:
+          summary: "Deployment {{ $labels.deployment }} rollout is stuck"
+          description: >
+            Deployment {{ $labels.namespace }}/{{ $labels.deployment }} has been
+            stuck in a non-progressing state for 15 minutes. A rollback may be needed.
+          runbook: "https://runbooks.internal/k8s/stuck-rollout"
+
+  - name: kubernetes.nodes
+    interval: 60s
+    rules:
+      - alert: NodeNotReady
+        expr: kube_node_status_condition{condition="Ready", status="true"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          category: kubernetes
+        annotations:
+          summary: "Node {{ $labels.node }} is not ready"
+          description: >
+            Node {{ $labels.node }} has been in NotReady state for 5+ minutes.
+            Check node health, kubelet logs, and EC2 instance status.
+          runbook: "https://runbooks.internal/k8s/node-not-ready"
+
+      - alert: NodeMemoryPressure
+        expr: kube_node_status_condition{condition="MemoryPressure", status="true"} == 1
+        for: 2m
+        labels:
+          severity: warning
+          category: kubernetes
+        annotations:
+          summary: "Node {{ $labels.node }} has memory pressure"
+          description: "Node {{ $labels.node }} is under memory pressure. Pods may be evicted."
+          runbook: "https://runbooks.internal/k8s/node-pressure"
+
+      - alert: NodeDiskPressure
+        expr: kube_node_status_condition{condition="DiskPressure", status="true"} == 1
+        for: 2m
+        labels:
+          severity: warning
+          category: kubernetes
+        annotations:
+          summary: "Node {{ $labels.node }} has disk pressure"
+          description: "Node {{ $labels.node }} is running low on disk space. Pods may be evicted."
+          runbook: "https://runbooks.internal/k8s/node-pressure"
+
+      - alert: NodeHighCPU
+        expr: |
+          100 - (avg by (node) (
+            rate(node_cpu_seconds_total{mode="idle"}[5m])
+          ) * 100) > 90
+        for: 15m
+        labels:
+          severity: warning
+          category: kubernetes
+        annotations:
+          summary: "Node {{ $labels.node }} CPU > 90%"
+          description: >
+            Node {{ $labels.node }} has been at {{ $value | humanize }}% CPU
+            for 15 minutes. Consider adding capacity or investigating noisy pods.
+
+  - name: kubernetes.pvcs
+    interval: 60s
+    rules:
+      - alert: PVCNearFull
+        expr: |
+          (
+            kubelet_volume_stats_used_bytes /
+            kubelet_volume_stats_capacity_bytes
+          ) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          category: kubernetes
+        annotations:
+          summary: "PVC {{ $labels.persistentvolumeclaim }} is {{ $value | humanize }}% full"
+          description: >
+            PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} is
+            {{ $value | humanize }}% full. Expand the volume or clean up data.
+          runbook: "https://runbooks.internal/k8s/pvc-full"
+
+      - alert: PVCFull
+        expr: |
+          (
+            kubelet_volume_stats_used_bytes /
+            kubelet_volume_stats_capacity_bytes
+          ) * 100 > 95
+        for: 1m
+        labels:
+          severity: critical
+          category: kubernetes
+        annotations:
+          summary: "PVC {{ $labels.persistentvolumeclaim }} is critically full"
+          description: >
+            PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} is
+            {{ $value | humanize }}% full. Immediate action required.
+          runbook: "https://runbooks.internal/k8s/pvc-full"
