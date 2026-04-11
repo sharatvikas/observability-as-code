@@ -1,0 +1,52 @@
+{{ define "slack.title" -}}
+{{ if eq .Status "firing" -}}
+  {{ if eq .CommonLabels.severity "critical" }}🔴{{ else if eq .CommonLabels.severity "warning" }}🟠{{ else }}⚠️{{ end }}
+  {{- " " }}[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}
+{{- else -}}
+  ✅ [RESOLVED] {{ .CommonLabels.alertname }}
+{{- end }}
+{{- end }}
+
+{{ define "slack.text" -}}
+*Alert:* {{ .CommonLabels.alertname }}
+*Severity:* {{ .CommonLabels.severity | title }}
+{{- if .CommonLabels.namespace }}
+*Namespace:* {{ .CommonLabels.namespace }}
+{{- end }}
+{{- if .CommonLabels.pod }}
+*Pod:* {{ .CommonLabels.pod }}
+{{- end }}
+{{- if .CommonLabels.node }}
+*Node:* {{ .CommonLabels.node }}
+{{- end }}
+{{- if .CommonLabels.job }}
+*Service:* {{ .CommonLabels.job }}
+{{- end }}
+
+{{- if .CommonAnnotations.summary }}
+*Summary:* {{ .CommonAnnotations.summary }}
+{{- end }}
+{{- if .CommonAnnotations.description }}
+*Details:* {{ .CommonAnnotations.description }}
+{{- end }}
+
+*Alerts firing:* {{ .Alerts.Firing | len }}
+{{- range .Alerts.Firing }}
+  • Started: {{ .StartsAt | since }}
+{{- end }}
+
+{{- if .CommonAnnotations.runbook }}
+📖 <{{ .CommonAnnotations.runbook }}|Runbook>
+{{- end }}
+{{- if .CommonAnnotations.dashboard }}
+📊 <{{ .CommonAnnotations.dashboard }}|Dashboard>
+{{- end }}
+{{- end }}
+
+{{ define "slack.color" -}}
+{{ if eq .Status "firing" -}}
+  {{ if eq .CommonLabels.severity "critical" }}danger{{ else if eq .CommonLabels.severity "warning" }}warning{{ else }}#439FE0{{ end }}
+{{- else -}}
+good
+{{- end }}
+{{- end }}
