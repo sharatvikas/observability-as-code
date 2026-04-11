@@ -1,0 +1,219 @@
+##
+## Kubernetes cluster recording rules — pre-computed resource utilization,
+## saturation, and capacity ratios for dashboard performance and alerting.
+## All rules follow the <namespace:metric:aggregation> naming convention.
+##
+groups:
+  # ─── Container Resource Utilization ────────────────────────────────────────
+  - name: kubernetes.container.recording
+    interval: 60s
+    rules:
+      # CPU utilization ratio: actual vs requested
+      - record: namespace_container:cpu_usage_ratio:rate5m
+        expr: |
+          sum by (namespace, pod, container) (
+            rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])
+          )
+          /
+          sum by (namespace, pod, container) (
+            kube_pod_container_resource_requests{resource="cpu", container!=""}
+          )
+
+      # Memory utilization ratio: working set vs requested
+      - record: namespace_container:memory_usage_ratio
+        expr: |
+          sum by (namespace, pod, container) (
+            container_memory_working_set_bytes{container!="", container!="POD"}
+          )
+          /
+          sum by (namespace, pod, container) (
+            kube_pod_container_resource_requests{resource="memory", container!=""}
+          )
+
+      # CPU throttling ratio — fraction of CPU periods throttled
+      - record: namespace_container:cpu_throttling_ratio:rate5m
+        expr: |
+          sum by (namespace, pod, container) (
+            rate(container_cpu_cfs_throttled_periods_total{container!=""}[5m])
+          )
+          /
+          sum by (namespace, pod, container) (
+            rate(container_cpu_cfs_periods_total{container!=""}[5m])
+          )
+
+      # OOMKill events per container over last hour
+      - record: namespace_container:oom_kills:rate1h
+        expr: |
+          sum by (namespace, pod, container) (
+            increase(container_oom_events_total{container!=""}[1h])
+          )
+
+  # ─── Namespace-Level Aggregations ──────────────────────────────────────────
+  - name: kubernetes.namespace.recording
+    interval: 60s
+    rules:
+      # Total CPU cores requested per namespace
+      - record: namespace:cpu_requested:sum
+        expr: |
+          sum by (namespace) (
+            kube_pod_container_resource_requests{resource="cpu", container!=""}
+          )
+
+      # Total CPU cores in use per namespace
+      - record: namespace:cpu_usage:rate5m
+        expr: |
+          sum by (namespace) (
+            rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])
+          )
+
+      # Namespace CPU utilization ratio vs cluster allocatable
+      - record: namespace:cpu_utilization_ratio:rate5m
+        expr: |
+          namespace:cpu_usage:rate5m
+          /
+          sum(kube_node_status_allocatable{resource="cpu"})
+
+      # Total memory bytes requested per namespace
+      - record: namespace:memory_requested:sum
+        expr: |
+          sum by (namespace) (
+            kube_pod_container_resource_requests{resource="memory", container!=""}
+          )
+
+      # Total memory working set per namespace
+      - record: namespace:memory_usage:sum
+        expr: |
+          sum by (namespace) (
+            container_memory_working_set_bytes{container!="", container!="POD"}
+          )
+
+      # Namespace memory utilization ratio vs cluster allocatable
+      - record: namespace:memory_utilization_ratio
+        expr: |
+          namespace:memory_usage:sum
+          /
+          sum(kube_node_status_allocatable{resource="memory"})
+
+      # Running pod count per namespace
+      - record: namespace:pod_count:sum
+        expr: |
+          sum by (namespace) (
+            kube_pod_status_phase{phase="Running"}
+          )
+
+      # Restart rate per namespace (useful for canary alerting)
+      - record: namespace:container_restarts:rate1h
+        expr: |
+          sum by (namespace) (
+            increase(kube_pod_container_status_restarts_total[1h])
+          )
+
+  # ─── Node Utilization ──────────────────────────────────────────────────────
+  - name: kubernetes.node.recording
+    interval: 60s
+    rules:
+      # Node CPU utilization
+      - record: node:cpu_utilization:rate5m
+        expr: |
+          1 - avg by (node) (
+            rate(node_cpu_seconds_total{mode="idle"}[5m])
+          )
+
+      # Node memory utilization
+      - record: node:memory_utilization
+        expr: |
+          1 - (
+            node_memory_MemAvailable_bytes
+            / node_memory_MemTotal_bytes
+          )
+
+      # Node disk pressure: used / capacity per mount
+      - record: node:disk_utilization
+        expr: |
+          1 - (
+            node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}
+            / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"}
+          )
+
+      # Node network receive bandwidth (bytes/s)
+      - record: node:network_receive_bytes:rate5m
+        expr: |
+          sum by (node) (
+            rate(node_network_receive_bytes_total{device!~"lo|veth.*|docker.*"}[5m])
+          )
+
+      # Node network transmit bandwidth (bytes/s)
+      - record: node:network_transmit_bytes:rate5m
+        expr: |
+          sum by (node) (
+            rate(node_network_transmit_bytes_total{device!~"lo|veth.*|docker.*"}[5m])
+          )
+
+      # Cluster-wide CPU allocatable headroom (cores available for new pods)
+      - record: cluster:cpu_allocatable_headroom
+        expr: |
+          sum(kube_node_status_allocatable{resource="cpu"})
+          -
+          sum(kube_pod_container_resource_requests{resource="cpu", container!=""})
+
+      # Cluster-wide memory allocatable headroom (bytes)
+      - record: cluster:memory_allocatable_headroom
+        expr: |
+          sum(kube_node_status_allocatable{resource="memory"})
+          -
+          sum(kube_pod_container_resource_requests{resource="memory", container!=""})
+
+  # ─── Deployment / Workload Health ──────────────────────────────────────────
+  - name: kubernetes.workload.recording
+    interval: 60s
+    rules:
+      # Deployment availability ratio: ready / desired
+      - record: namespace_deployment:availability_ratio
+        expr: |
+          kube_deployment_status_replicas_ready
+          /
+          kube_deployment_spec_replicas
+
+      # StatefulSet availability ratio
+      - record: namespace_statefulset:availability_ratio
+        expr: |
+          kube_statefulset_status_replicas_ready
+          /
+          kube_statefulset_replicas
+
+      # DaemonSet availability ratio
+      - record: namespace_daemonset:availability_ratio
+        expr: |
+          kube_daemonset_status_number_ready
+          /
+          kube_daemonset_status_desired_number_scheduled
+
+      # Pending pod count (scheduling pressure indicator)
+      - record: namespace:pod_pending:sum
+        expr: |
+          sum by (namespace) (
+            kube_pod_status_phase{phase="Pending"}
+          )
+
+      # Failed pod count
+      - record: namespace:pod_failed:sum
+        expr: |
+          sum by (namespace) (
+            kube_pod_status_phase{phase="Failed"}
+          )
+
+  # ─── PersistentVolume Utilization ──────────────────────────────────────────
+  - name: kubernetes.pv.recording
+    interval: 300s
+    rules:
+      # PV utilization: used / capacity
+      - record: namespace_pvc:disk_utilization
+        expr: |
+          kubelet_volume_stats_used_bytes
+          /
+          kubelet_volume_stats_capacity_bytes
+
+      # PVs approaching capacity (> 80% full)
+      - record: namespace_pvc:disk_utilization_critical
+        expr: |
+          namespace_pvc:disk_utilization > 0.80
