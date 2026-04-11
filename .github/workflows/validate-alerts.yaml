@@ -1,0 +1,103 @@
+name: Validate Alert Rules
+
+on:
+  push:
+    paths:
+      - "alerts/**"
+      - "recording-rules/**"
+  pull_request:
+    paths:
+      - "alerts/**"
+      - "recording-rules/**"
+
+jobs:
+  promtool-check:
+    name: promtool lint & unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Prometheus
+        run: |
+          PROM_VERSION="2.51.0"
+          curl -sL "https://github.com/prometheus/prometheus/releases/download/v${PROM_VERSION}/prometheus-${PROM_VERSION}.linux-amd64.tar.gz" \
+            | tar -xz --strip-components=1 -C /usr/local/bin prometheus-${PROM_VERSION}.linux-amd64/promtool
+
+      - name: Check alert rules syntax
+        run: |
+          for f in alerts/*.yaml; do
+            echo "Checking $f..."
+            promtool check rules "$f"
+          done
+
+      - name: Check recording rules syntax
+        run: |
+          for f in recording-rules/*.yaml; do
+            echo "Checking $f..."
+            promtool check rules "$f"
+          done
+
+      - name: Run unit tests (if present)
+        run: |
+          if ls tests/rules/*.yaml 2>/dev/null; then
+            promtool test rules tests/rules/*.yaml
+          else
+            echo "No unit tests found — skipping"
+          fi
+
+  jsonnet-lint:
+    name: Jsonnet dashboard lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jsonnet
+        run: |
+          sudo apt-get install -y jsonnet
+
+      - name: Install grafonnet via jsonnet-bundler
+        run: |
+          go install github.com/jsonnet-bundler/jsonnet-bundler/cmd/jb@latest
+          cd dashboards && jb install 2>/dev/null || true
+
+      - name: Lint dashboards
+        run: |
+          for f in dashboards/*.libsonnet dashboards/*.jsonnet; do
+            [ -f "$f" ] || continue
+            echo "Linting $f..."
+            jsonnet --lint "$f" 2>&1 | grep -v "^$" || true
+          done
+
+  alert-coverage:
+    name: SLO alert coverage check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required alert groups exist
+        run: |
+          python3 - <<'EOF'
+          import yaml, glob, sys
+
+          required_groups = {
+              "kubernetes.pods",
+              "kubernetes.deployments",
+              "kubernetes.nodes",
+              "slo.availability",
+              "slo.latency",
+          }
+
+          found = set()
+          for path in glob.glob("alerts/**/*.yaml", recursive=True) + glob.glob("recording-rules/**/*.yaml", recursive=True):
+              with open(path) as f:
+                  doc = yaml.safe_load(f)
+              for group in (doc or {}).get("groups", []):
+                  found.add(group["name"])
+
+          missing = required_groups - found
+          if missing:
+              print(f"FAIL: Missing required alert groups: {missing}")
+              sys.exit(1)
+          else:
+              print(f"OK: All {len(required_groups)} required groups present")
+          EOF
