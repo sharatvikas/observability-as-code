@@ -1,0 +1,79 @@
+# promtool unit tests for SLO alert rules
+# Run with: promtool test rules tests/rules/slo_test.yaml
+
+rule_files:
+  - ../../alerts/slo.yaml
+  - ../../recording-rules/slo.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # ── Fast burn (1h window) should fire at 14.4x burn rate ─────────────────
+  - name: "SLO fast burn fires at 14.4x burn rate"
+    interval: 1m
+    input_series:
+      # Simulate 1.44% error rate on a 99.9% SLO service
+      # Burn rate = 0.0144 / (1 - 0.999) = 14.4x
+      - series: 'http_requests_total{job="payment-service",status="200"}'
+        values: "1000+1000x60"
+      - series: 'http_requests_total{job="payment-service",status="500"}'
+        values: "14.4+14.4x60"    # 14.4 errors per 1000 = 1.44% error rate
+
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: SLOFastBurnAvailability
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: payment-service
+            exp_annotations:
+              summary: "High error rate burn rate for payment-service"
+
+  # ── Fast burn should NOT fire below threshold ─────────────────────────────
+  - name: "SLO fast burn does not fire at 10x burn rate"
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="payment-service",status="200"}'
+        values: "1000+1000x60"
+      - series: 'http_requests_total{job="payment-service",status="500"}'
+        values: "10+10x60"        # 1% error rate = 10x burn
+
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: SLOFastBurnAvailability
+        exp_alerts: []             # Should NOT fire
+
+  # ── Slow burn (6h window) should fire at 6x burn rate ────────────────────
+  - name: "SLO slow burn fires after sustained 6x burn rate"
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="auth-service",status="200"}'
+        values: "1000+1000x400"
+      - series: 'http_requests_total{job="auth-service",status="500"}'
+        values: "6+6x400"         # 0.6% error rate = 6x burn
+
+    alert_rule_test:
+      - eval_time: 370m           # Needs 6h of data
+        alertname: SLOSlowBurnAvailability
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: auth-service
+
+  # ── Error budget low should fire when < 10% budget remains ───────────────
+  - name: "Error budget low alert fires when budget nearly exhausted"
+    interval: 1m
+    input_series:
+      # Sustained 1x burn rate for 27 days uses 90% of 30-day error budget
+      - series: 'http_requests_total{job="api-gateway",status="200"}'
+        values: "1000+1000x43200"
+      - series: 'http_requests_total{job="api-gateway",status="500"}'
+        values: "1+1x43200"       # 0.1% error rate = 1x burn (consuming budget steadily)
+
+    alert_rule_test:
+      - eval_time: 43200m         # 30 days
+        alertname: SLOErrorBudgetLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: api-gateway
