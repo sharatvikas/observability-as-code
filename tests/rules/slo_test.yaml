@@ -1,79 +1,219 @@
-# promtool unit tests for SLO alert rules
-# Run with: promtool test rules tests/rules/slo_test.yaml
-
+##
+## promtool unit tests for SLO multi-burn-rate alerting rules.
+## Validates fast-burn, slow-burn, and budget-low thresholds.
+##
+## Run: promtool test rules tests/rules/slo_test.yaml
+##
+## NOTE: SLO alerts depend on pre-computed ratio metrics. These tests
+## inject the ratio metrics directly rather than the raw counters.
+## This is the standard approach for testing multi-window SLO alerts
+## because it decouples the recording rule computation from alert logic.
+##
 rule_files:
   - ../../alerts/slo.yaml
-  - ../../recording-rules/slo.yaml
 
 evaluation_interval: 1m
 
 tests:
-  # ── Fast burn (1h window) should fire at 14.4x burn rate ─────────────────
-  - name: "SLO fast burn fires at 14.4x burn rate"
+  ##
+  ## SLOAvailabilityFastBurn — 99.9% SLO, burn rate > 14.4x
+  ## Alert requires BOTH 1h and 5m windows to be elevated (double window)
+  ##
+
+  - name: SLOAvailabilityFastBurn fires when 1h and 5m windows both show fast burn
     interval: 1m
     input_series:
-      # Simulate 1.44% error rate on a 99.9% SLO service
-      # Burn rate = 0.0144 / (1 - 0.999) = 14.4x
-      - series: 'http_requests_total{job="payment-service",status="200"}'
-        values: "1000+1000x60"
-      - series: 'http_requests_total{job="payment-service",status="500"}'
-        values: "14.4+14.4x60"    # 14.4 errors per 1000 = 1.44% error rate
+      # Burn rate 14.4x threshold = 14.4 * 0.001 = 0.0144
+      # Use 0.02 (2% error rate) — well above threshold
+      - series: 'job:request_error_rate:ratio_rate1h{job="payments-api"}'
+        values: '0.02 0.02 0.02 0.02 0.02'
+      - series: 'job:request_error_rate:ratio_rate5m{job="payments-api"}'
+        values: '0.02 0.02 0.02 0.02 0.02'
 
     alert_rule_test:
-      - eval_time: 10m
-        alertname: SLOFastBurnAvailability
+      - eval_time: 1m
+        alertname: SLOAvailabilityFastBurn
         exp_alerts:
           - exp_labels:
+              job: payments-api
               severity: critical
-              job: payment-service
+              category: slo
+              window: "1h"
             exp_annotations:
-              summary: "High error rate burn rate for payment-service"
+              summary: "payments-api SLO fast burn — page immediately"
 
-  # ── Fast burn should NOT fire below threshold ─────────────────────────────
-  - name: "SLO fast burn does not fire at 10x burn rate"
+  - name: SLOAvailabilityFastBurn does not fire when only 1h window is elevated
     interval: 1m
     input_series:
-      - series: 'http_requests_total{job="payment-service",status="200"}'
-        values: "1000+1000x60"
-      - series: 'http_requests_total{job="payment-service",status="500"}'
-        values: "10+10x60"        # 1% error rate = 10x burn
+      - series: 'job:request_error_rate:ratio_rate1h{job="checkout-api"}'
+        values: '0.02 0.02 0.02 0.02 0.02'
+      # 5m window is low — recent recovery, not a fast burn
+      - series: 'job:request_error_rate:ratio_rate5m{job="checkout-api"}'
+        values: '0.0005 0.0005 0.0005 0.0005 0.0005'
 
     alert_rule_test:
-      - eval_time: 10m
-        alertname: SLOFastBurnAvailability
-        exp_alerts: []             # Should NOT fire
+      - eval_time: 5m
+        alertname: SLOAvailabilityFastBurn
+        exp_alerts: []
 
-  # ── Slow burn (6h window) should fire at 6x burn rate ────────────────────
-  - name: "SLO slow burn fires after sustained 6x burn rate"
+  - name: SLOAvailabilityFastBurn does not fire for healthy service
     interval: 1m
     input_series:
-      - series: 'http_requests_total{job="auth-service",status="200"}'
-        values: "1000+1000x400"
-      - series: 'http_requests_total{job="auth-service",status="500"}'
-        values: "6+6x400"         # 0.6% error rate = 6x burn
+      - series: 'job:request_error_rate:ratio_rate1h{job="auth-api"}'
+        values: '0.0001 0.0001 0.0001 0.0001 0.0001'
+      - series: 'job:request_error_rate:ratio_rate5m{job="auth-api"}'
+        values: '0.0001 0.0001 0.0001 0.0001 0.0001'
 
     alert_rule_test:
-      - eval_time: 370m           # Needs 6h of data
-        alertname: SLOSlowBurnAvailability
+      - eval_time: 5m
+        alertname: SLOAvailabilityFastBurn
+        exp_alerts: []
+
+  ##
+  ## SLOAvailabilitySlowBurn — burn rate > 6x over 6h + 30m
+  ##
+
+  - name: SLOAvailabilitySlowBurn fires when both 6h and 30m windows show elevated error rate
+    interval: 1m
+    input_series:
+      # Slow burn threshold = 6 * 0.001 = 0.006
+      # Use 0.008 — above the 6x threshold
+      - series: 'job:request_error_rate:ratio_rate6h{job="payments-api"}'
+        values: '0.008 0.008 0.008 0.008 0.008'
+      - series: 'job:request_error_rate:ratio_rate30m{job="payments-api"}'
+        values: '0.008 0.008 0.008 0.008 0.008'
+
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: SLOAvailabilitySlowBurn
         exp_alerts:
           - exp_labels:
+              job: payments-api
               severity: warning
-              job: auth-service
+              category: slo
+              window: "6h"
+            exp_annotations:
+              summary: "payments-api SLO slow burn — investigate"
 
-  # ── Error budget low should fire when < 10% budget remains ───────────────
-  - name: "Error budget low alert fires when budget nearly exhausted"
+  - name: SLOAvailabilitySlowBurn does not fire when error rate is below threshold
     interval: 1m
     input_series:
-      # Sustained 1x burn rate for 27 days uses 90% of 30-day error budget
-      - series: 'http_requests_total{job="api-gateway",status="200"}'
-        values: "1000+1000x43200"
-      - series: 'http_requests_total{job="api-gateway",status="500"}'
-        values: "1+1x43200"       # 0.1% error rate = 1x burn (consuming budget steadily)
+      - series: 'job:request_error_rate:ratio_rate6h{job="checkout-api"}'
+        values: '0.0005 0.0005 0.0005 0.0005 0.0005'
+      - series: 'job:request_error_rate:ratio_rate30m{job="checkout-api"}'
+        values: '0.0005 0.0005 0.0005 0.0005 0.0005'
 
     alert_rule_test:
-      - eval_time: 43200m         # 30 days
-        alertname: SLOErrorBudgetLow
+      - eval_time: 5m
+        alertname: SLOAvailabilitySlowBurn
+        exp_alerts: []
+
+  ##
+  ## SLOAvailabilityBudgetLow — sustained 3d error rate above 1x (0.001)
+  ##
+
+  - name: SLOAvailabilityBudgetLow fires after 1h of sustained elevated 3d error rate
+    interval: 1m
+    input_series:
+      # 0.002 = 2x the 99.9% SLO threshold (0.001), sustained for >1h
+      - series: 'job:request_error_rate:ratio_rate3d{job="payments-api"}'
+        values: '0.002+0x62'
+
+    alert_rule_test:
+      - eval_time: 61m
+        alertname: SLOAvailabilityBudgetLow
         exp_alerts:
           - exp_labels:
+              job: payments-api
+              severity: info
+              category: slo
+              window: "3d"
+            exp_annotations:
+              summary: "payments-api SLO error budget will be exhausted this month"
+
+  - name: SLOAvailabilityBudgetLow does not fire for healthy 3d error rate
+    interval: 1m
+    input_series:
+      - series: 'job:request_error_rate:ratio_rate3d{job="auth-api"}'
+        values: '0.0002+0x62'
+
+    alert_rule_test:
+      - eval_time: 61m
+        alertname: SLOAvailabilityBudgetLow
+        exp_alerts: []
+
+  ##
+  ## SLOLatencyFastBurn — 95% of requests < 200ms, burn rate > 14.4x
+  ##
+
+  - name: SLOLatencyFastBurn fires when both 1h and 5m windows show fast latency burn
+    interval: 1m
+    input_series:
+      # Threshold = 14.4 * 0.05 = 0.72 (72% of requests above 200ms)
+      - series: 'job:request_latency_above_slo:ratio_rate1h{job="payments-api"}'
+        values: '0.80 0.80 0.80 0.80 0.80'
+      - series: 'job:request_latency_above_slo:ratio_rate5m{job="payments-api"}'
+        values: '0.80 0.80 0.80 0.80 0.80'
+
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: SLOLatencyFastBurn
+        exp_alerts:
+          - exp_labels:
+              job: payments-api
+              severity: critical
+              category: slo
+              window: "1h"
+            exp_annotations:
+              summary: "payments-api latency SLO fast burn"
+
+  - name: SLOLatencyFastBurn does not fire for acceptable latency distribution
+    interval: 1m
+    input_series:
+      - series: 'job:request_latency_above_slo:ratio_rate1h{job="checkout-api"}'
+        values: '0.02 0.02 0.02 0.02 0.02'
+      - series: 'job:request_latency_above_slo:ratio_rate5m{job="checkout-api"}'
+        values: '0.02 0.02 0.02 0.02 0.02'
+
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: SLOLatencyFastBurn
+        exp_alerts: []
+
+  ##
+  ## SLOLatencySlowBurn — burn rate > 6x over 6h + 30m
+  ##
+
+  - name: SLOLatencySlowBurn fires when both 6h and 30m windows show elevated latency
+    interval: 1m
+    input_series:
+      # Threshold = 6 * 0.05 = 0.30 (30% of requests above SLO threshold)
+      - series: 'job:request_latency_above_slo:ratio_rate6h{job="payments-api"}'
+        values: '0.40 0.40 0.40 0.40 0.40'
+      - series: 'job:request_latency_above_slo:ratio_rate30m{job="payments-api"}'
+        values: '0.40 0.40 0.40 0.40 0.40'
+
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: SLOLatencySlowBurn
+        exp_alerts:
+          - exp_labels:
+              job: payments-api
               severity: warning
-              job: api-gateway
+              category: slo
+              window: "6h"
+            exp_annotations:
+              summary: "payments-api latency SLO slow burn"
+
+  - name: SLOLatencySlowBurn does not fire for healthy latency
+    interval: 1m
+    input_series:
+      - series: 'job:request_latency_above_slo:ratio_rate6h{job="checkout-api"}'
+        values: '0.01 0.01 0.01 0.01 0.01'
+      - series: 'job:request_latency_above_slo:ratio_rate30m{job="checkout-api"}'
+        values: '0.01 0.01 0.01 0.01 0.01'
+
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: SLOLatencySlowBurn
+        exp_alerts: []
