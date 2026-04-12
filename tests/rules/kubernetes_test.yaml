@@ -1,0 +1,175 @@
+##
+## promtool unit tests for Kubernetes alerting rules.
+## Validates that alerts fire at the correct thresholds and NOT for healthy conditions.
+##
+## Run: promtool test rules tests/rules/kubernetes_test.yaml
+##
+rule_files:
+  - ../../alerts/kubernetes.yaml
+
+evaluation_interval: 1m
+
+tests:
+  ##
+  ## KubePodCrashLooping
+  ##
+
+  - name: KubePodCrashLooping fires when restart rate is high
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="production", pod="payment-api-abc", container="api", job="kube-state-metrics"}'
+        values: '0 5 10 15 20 25 30 35 40 45 50 55 60 65'
+
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: KubePodCrashLooping
+        exp_alerts:
+          - exp_labels:
+              namespace: production
+              pod: payment-api-abc
+              container: api
+              severity: critical
+            exp_annotations:
+              summary: "Pod payment-api-abc is crash looping"
+
+  - name: KubePodCrashLooping does not fire for stable pod
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="production", pod="stable-pod", container="app", job="kube-state-metrics"}'
+        values: '0 0 0 0 0 0 0 0 0 0 0 0 0 0'
+
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: KubePodCrashLooping
+        exp_alerts: []
+
+  ##
+  ## KubePodNotReady
+  ##
+
+  - name: KubePodNotReady fires when pod is not ready for 5 minutes
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_status_phase{namespace="staging", pod="checkout-abc", phase="Pending", job="kube-state-metrics"}'
+        values: '1 1 1 1 1 1 1 1 1 1'
+      - series: 'kube_pod_status_phase{namespace="staging", pod="checkout-abc", phase="Running", job="kube-state-metrics"}'
+        values: '0 0 0 0 0 0 0 0 0 0'
+
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: KubePodNotReady
+        exp_alerts:
+          - exp_labels:
+              namespace: staging
+              pod: checkout-abc
+              severity: warning
+
+  - name: KubePodNotReady does not fire for running pod
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_status_phase{namespace="production", pod="healthy-pod", phase="Running", job="kube-state-metrics"}'
+        values: '1 1 1 1 1 1 1 1 1 1'
+
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KubePodNotReady
+        exp_alerts: []
+
+  ##
+  ## KubeDeploymentReplicasMismatch
+  ##
+
+  - name: KubeDeploymentReplicasMismatch fires when replicas are unavailable
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_spec_replicas{namespace="production", deployment="api-server", job="kube-state-metrics"}'
+        values: '3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3'
+      - series: 'kube_deployment_status_replicas_ready{namespace="production", deployment="api-server", job="kube-state-metrics"}'
+        values: '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: KubeDeploymentReplicasMismatch
+        exp_alerts:
+          - exp_labels:
+              namespace: production
+              deployment: api-server
+              severity: warning
+
+  - name: KubeDeploymentReplicasMismatch does not fire during rolling update
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_spec_replicas{namespace="production", deployment="healthy", job="kube-state-metrics"}'
+        values: '3 3 3 3 3'
+      - series: 'kube_deployment_status_replicas_ready{namespace="production", deployment="healthy", job="kube-state-metrics"}'
+        values: '3 3 3 3 3'
+
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: KubeDeploymentReplicasMismatch
+        exp_alerts: []
+
+  ##
+  ## KubeNodeNotReady
+  ##
+
+  - name: KubeNodeNotReady fires when node is not ready
+    interval: 1m
+    input_series:
+      - series: 'kube_node_status_condition{node="ip-10-0-1-234", condition="Ready", status="true", job="kube-state-metrics"}'
+        values: '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0'
+      - series: 'kube_node_status_condition{node="ip-10-0-1-234", condition="Ready", status="false", job="kube-state-metrics"}'
+        values: '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: KubeNodeNotReady
+        exp_alerts:
+          - exp_labels:
+              node: ip-10-0-1-234
+              severity: critical
+
+  - name: KubeNodeNotReady does not fire for healthy node
+    interval: 1m
+    input_series:
+      - series: 'kube_node_status_condition{node="ip-10-0-2-100", condition="Ready", status="true", job="kube-state-metrics"}'
+        values: '1 1 1 1 1 1 1 1 1 1'
+
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KubeNodeNotReady
+        exp_alerts: []
+
+  ##
+  ## KubePersistentVolumeFillingUp
+  ##
+
+  - name: KubePersistentVolumeFillingUp fires at 85% full
+    interval: 1m
+    input_series:
+      - series: 'kubelet_volume_stats_used_bytes{namespace="data", persistentvolumeclaim="postgres-pvc", job="kubelet"}'
+        values: '85e9 85e9 85e9 85e9 85e9 85e9 85e9 85e9 85e9 85e9 85e9 85e9'
+      - series: 'kubelet_volume_stats_capacity_bytes{namespace="data", persistentvolumeclaim="postgres-pvc", job="kubelet"}'
+        values: '100e9 100e9 100e9 100e9 100e9 100e9 100e9 100e9 100e9 100e9 100e9 100e9'
+
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KubePersistentVolumeFillingUp
+        exp_alerts:
+          - exp_labels:
+              namespace: data
+              persistentvolumeclaim: postgres-pvc
+              severity: warning
+
+  - name: KubePersistentVolumeFillingUp does not fire below threshold
+    interval: 1m
+    input_series:
+      - series: 'kubelet_volume_stats_used_bytes{namespace="data", persistentvolumeclaim="small-pvc", job="kubelet"}'
+        values: '50e9 50e9 50e9 50e9 50e9 50e9 50e9 50e9 50e9 50e9'
+      - series: 'kubelet_volume_stats_capacity_bytes{namespace="data", persistentvolumeclaim="small-pvc", job="kubelet"}'
+        values: '100e9 100e9 100e9 100e9 100e9 100e9 100e9 100e9 100e9 100e9'
+
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KubePersistentVolumeFillingUp
+        exp_alerts: []
