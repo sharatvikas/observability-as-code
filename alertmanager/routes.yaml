@@ -1,0 +1,134 @@
+##
+## Alertmanager Routing Configuration
+## Extended routes for team-based delivery, inhibition rules, and dead man's switch
+##
+## Complements alertmanager.yaml (which holds the global config and receivers).
+## Apply with: kubectl create configmap alertmanager-routes --from-file=routes.yaml
+##
+## Routing strategy:
+##   1. Critical/SLO alerts → PagerDuty immediately (with Slack for visibility)
+##   2. High severity → team-specific Slack channels with 15m grouping
+##   3. Warning/Info → digest channel, 1h grouping to reduce noise
+##   4. Watchdog → dead man's switch receiver (alerts if it stops firing)
+##   5. Inhibition: if a node is down, suppress pod-level alerts for that node
+##
+
+route:
+  receiver: slack-default
+  group_by: ["alertname", "namespace", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+  routes:
+
+    # ── Dead man's switch ──────────────────────────────────────────────────
+    # Watchdog must fire continuously — its absence triggers the deadman receiver
+    - matchers:
+        - alertname = "Watchdog"
+      receiver: deadman-switch
+      group_wait: 0s
+      repeat_interval: 1m
+
+    # ── SLO fast burn: wake people up immediately ─────────────────────────
+    - matchers:
+        - alertname =~ "SLOFastBurn|SLOErrorBudgetCritical"
+      receiver: pagerduty-critical
+      group_wait: 10s
+      repeat_interval: 30m
+      continue: true  # also notify Slack
+
+    - matchers:
+        - alertname =~ "SLOFastBurn|SLOErrorBudgetCritical"
+      receiver: slack-slo-alerts
+      group_wait: 10s
+
+    # ── Critical severity: PagerDuty + Slack ─────────────────────────────
+    - matchers:
+        - severity = "critical"
+      receiver: pagerduty-critical
+      group_wait: 15s
+      repeat_interval: 1h
+      continue: true
+
+    - matchers:
+        - severity = "critical"
+      receiver: slack-critical
+      group_wait: 15s
+
+    # ── Team-based routing ────────────────────────────────────────────────
+    - matchers:
+        - team = "payments"
+      receiver: slack-team-payments
+      group_wait: 1m
+      group_interval: 10m
+      repeat_interval: 2h
+
+    - matchers:
+        - team = "platform"
+      receiver: slack-team-platform
+      group_wait: 1m
+      group_interval: 10m
+      repeat_interval: 2h
+
+    - matchers:
+        - team = "data"
+      receiver: slack-team-data
+      group_wait: 2m
+      group_interval: 15m
+      repeat_interval: 4h
+
+    # ── High severity: team channels ──────────────────────────────────────
+    - matchers:
+        - severity = "warning"
+      receiver: slack-warnings
+      group_wait: 2m
+      group_interval: 15m
+      repeat_interval: 8h
+
+    # ── Info: digest only ──────────────────────────────────────────────────
+    - matchers:
+        - severity = "info"
+      receiver: slack-digest
+      group_wait: 5m
+      group_interval: 1h
+      repeat_interval: 24h
+
+    # ── FinOps anomaly alerts ─────────────────────────────────────────────
+    - matchers:
+        - alertname =~ "AWSCostAnomaly|AWSBudgetExceeded|AWSForecastOverBudget"
+      receiver: slack-finops
+      group_wait: 5m
+      repeat_interval: 6h
+
+
+# ── Inhibition rules ─────────────────────────────────────────────────────────
+#
+# Inhibit pod/service alerts when the underlying node is down
+# (avoids alert storm of "PodNotReady" when the whole node fails)
+inhibit_rules:
+
+  - source_matchers:
+      - alertname = "NodeDown"
+    target_matchers:
+      - alertname =~ "PodNotReady|PodCrashLooping|ContainerOOMKilled"
+    equal: ["node"]
+
+  - source_matchers:
+      - alertname = "KubernetesNodeNotReady"
+    target_matchers:
+      - severity = "warning"
+    equal: ["node"]
+
+  # If the whole cluster is down, suppress individual service alerts
+  - source_matchers:
+      - alertname = "ClusterUnreachable"
+    target_matchers:
+      - severity =~ "warning|info"
+
+  # If a deployment is being rolled out, suppress CrashLoop alerts for 5m
+  - source_matchers:
+      - alertname = "DeploymentRolloutInProgress"
+    target_matchers:
+      - alertname = "PodCrashLooping"
+    equal: ["namespace", "deployment"]
