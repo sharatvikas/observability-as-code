@@ -1,0 +1,215 @@
+##
+## AWS CloudWatch Exporter recording rules.
+## Pre-aggregates cost, performance, and saturation metrics from
+## cloudwatch-exporter (https://github.com/prometheus/cloudwatch_exporter)
+## to reduce query complexity in dashboards and enable multi-window alerting.
+##
+## Metric naming convention: <service>:<metric>:<aggregation>
+## All rules re-evaluated every 5 minutes (AWS CloudWatch delay is 5-15 min).
+##
+groups:
+
+  # ─── EC2 ──────────────────────────────────────────────────────────────────
+  - name: aws.ec2.recording
+    interval: 5m
+    rules:
+      # Average CPU across all EC2 instances per region
+      - record: aws_ec2:cpu_utilization_percent:avg
+        expr: |
+          avg by (region) (
+            aws_ec2_cpuutilization_average
+          )
+
+      # CPU utilization p90 per instance type (used for reservation sizing)
+      - record: aws_ec2:cpu_utilization_percent:p90_by_instance_type
+        expr: |
+          histogram_quantile(0.90,
+            sum by (instance_type, le) (
+              rate(aws_ec2_cpuutilization_average_bucket[30m])
+            )
+          )
+
+      # Instances with CPU > 80% (risk of throttling)
+      - record: aws_ec2:high_cpu_instance_count
+        expr: |
+          count by (region) (
+            aws_ec2_cpuutilization_average > 80
+          )
+
+      # Instances with CPU < 5% for 24h (waste candidates)
+      - record: aws_ec2:idle_instance_count
+        expr: |
+          count by (region) (
+            avg_over_time(aws_ec2_cpuutilization_average[24h]) < 5
+          )
+
+  # ─── RDS ──────────────────────────────────────────────────────────────────
+  - name: aws.rds.recording
+    interval: 5m
+    rules:
+      # Free storage space in GiB (low = risk of out-of-space)
+      - record: aws_rds:free_storage_gib
+        expr: aws_rds_free_storage_space_average / 1024 / 1024 / 1024
+
+      # Storage used as a ratio of allocated storage (requires kube-state or label)
+      - record: aws_rds:storage_utilization_ratio
+        expr: |
+          1 - (
+            aws_rds_free_storage_space_average
+            /
+            on (dbinstance_identifier) group_left()
+            aws_rds_allocated_storage_average * 1024 * 1024 * 1024
+          )
+
+      # DB connection count relative to max_connections (saturation)
+      - record: aws_rds:connection_utilization_ratio
+        expr: |
+          aws_rds_database_connections_average
+          /
+          on (dbinstance_identifier) group_left()
+          aws_rds_max_connections_average
+
+      # Read/write IOPS total
+      - record: aws_rds:iops_total
+        expr: |
+          (
+            aws_rds_read_iops_average
+            +
+            aws_rds_write_iops_average
+          )
+
+      # Replication lag in seconds (multi-AZ / read replicas)
+      - record: aws_rds:replica_lag_seconds
+        expr: aws_rds_replica_lag_average
+
+  # ─── ALB ──────────────────────────────────────────────────────────────────
+  - name: aws.alb.recording
+    interval: 1m
+    rules:
+      # Request rate per second
+      - record: aws_alb:request_rate
+        expr: |
+          sum by (load_balancer) (
+            rate(aws_alb_request_count_sum[5m])
+          )
+
+      # 4xx error ratio (client errors)
+      - record: aws_alb:error_ratio_4xx
+        expr: |
+          sum by (load_balancer) (
+            rate(aws_alb_httpcode_elb_4_xx_count_sum[5m])
+          )
+          /
+          sum by (load_balancer) (
+            rate(aws_alb_request_count_sum[5m]) > 0
+          )
+
+      # 5xx error ratio (server errors / upstream errors)
+      - record: aws_alb:error_ratio_5xx
+        expr: |
+          sum by (load_balancer) (
+            rate(aws_alb_httpcode_elb_5_xx_count_sum[5m])
+            +
+            rate(aws_alb_httpcode_target_5_xx_count_sum[5m])
+          )
+          /
+          sum by (load_balancer) (
+            rate(aws_alb_request_count_sum[5m]) > 0
+          )
+
+      # P99 target response time (ms)
+      - record: aws_alb:target_response_time_p99_ms
+        expr: |
+          histogram_quantile(0.99,
+            sum by (load_balancer, le) (
+              rate(aws_alb_target_response_time_bucket[5m])
+            )
+          ) * 1000
+
+      # Healthy target ratio per target group
+      - record: aws_alb:healthy_target_ratio
+        expr: |
+          aws_alb_healthy_host_count_average
+          /
+          (
+            aws_alb_healthy_host_count_average
+            +
+            aws_alb_un_healthy_host_count_average
+          )
+
+  # ─── SQS ──────────────────────────────────────────────────────────────────
+  - name: aws.sqs.recording
+    interval: 1m
+    rules:
+      # Messages waiting to be processed (visible messages)
+      - record: aws_sqs:queue_depth
+        expr: aws_sqs_approximate_number_of_messages_visible_average
+
+      # Age of oldest message — high values indicate consumer lag
+      - record: aws_sqs:oldest_message_age_seconds
+        expr: aws_sqs_approximate_age_of_oldest_message_maximum
+
+      # In-flight message ratio (messages being processed / max in-flight)
+      # Standard queues allow 120k in-flight, FIFO queues allow 20k
+      - record: aws_sqs:inflight_utilization_ratio
+        expr: |
+          aws_sqs_approximate_number_of_messages_not_visible_average / 120000
+
+      # Message send rate
+      - record: aws_sqs:send_rate
+        expr: |
+          sum by (queue_name) (
+            rate(aws_sqs_number_of_messages_sent_sum[5m])
+          )
+
+      # Consumer rate
+      - record: aws_sqs:receive_rate
+        expr: |
+          sum by (queue_name) (
+            rate(aws_sqs_number_of_messages_received_sum[5m])
+          )
+
+      # Consumer lag ratio: how far behind is the consumer?
+      - record: aws_sqs:consumer_lag_ratio
+        expr: |
+          (aws_sqs_approximate_number_of_messages_visible_average > 0)
+            /
+          (
+            aws_sqs:receive_rate > 0
+          )
+
+  # ─── FinOps: Cost Recording Rules ─────────────────────────────────────────
+  - name: aws.finops.recording
+    interval: 15m
+    rules:
+      # Daily cost per service (requires aws-cost-exporter)
+      - record: aws_cost:daily_usd_by_service
+        expr: |
+          sum by (service) (
+            aws_billing_estimated_charges
+          )
+
+      # 7-day rolling average cost per service (baseline for anomaly detection)
+      - record: aws_cost:7d_avg_usd_by_service
+        expr: |
+          avg_over_time(aws_cost:daily_usd_by_service[7d])
+
+      # Cost change ratio vs 7d baseline (>1 = spending more than average)
+      - record: aws_cost:change_ratio_vs_7d_baseline
+        expr: |
+          aws_cost:daily_usd_by_service
+          /
+          aws_cost:7d_avg_usd_by_service
+
+      # Cumulative month-to-date spend
+      - record: aws_cost:month_to_date_usd
+        expr: |
+          sum(aws_billing_estimated_charges)
+
+      # Top 3 services by cost share
+      - record: aws_cost:service_cost_share_ratio
+        expr: |
+          aws_cost:daily_usd_by_service
+          /
+          ignoring(service) group_left()
+          sum(aws_cost:daily_usd_by_service)
