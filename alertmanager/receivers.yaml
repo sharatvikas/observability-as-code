@@ -1,0 +1,154 @@
+##
+## Alertmanager Receivers Configuration
+## Defines all notification channels referenced in routes.yaml
+##
+## Secrets are loaded from Kubernetes secrets — never stored in plaintext here.
+## Apply with:
+##   kubectl create secret generic alertmanager-secrets \
+##     --from-literal=slack-webhook-url=https://hooks.slack.com/... \
+##     --from-literal=pagerduty-integration-key=...
+##
+
+receivers:
+
+  # ── PagerDuty ─────────────────────────────────────────────────────────────
+  - name: pagerduty-critical
+    pagerduty_configs:
+      - routing_key_file: /etc/alertmanager/secrets/pagerduty-integration-key
+        description: >-
+          {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+        severity: >-
+          {{ if eq .CommonLabels.severity "critical" }}critical{{ else }}error{{ end }}
+        client: "AlertManager / k8s"
+        client_url: "{{ (index .Alerts 0).GeneratorURL }}"
+        details:
+          namespace: "{{ .CommonLabels.namespace }}"
+          cluster: "{{ .CommonLabels.cluster }}"
+          runbook: "{{ (index .Alerts 0).Annotations.runbook_url }}"
+        links:
+          - href: "{{ (index .Alerts 0).Annotations.runbook_url }}"
+            text: "Runbook"
+          - href: "{{ .ExternalURL }}/#/alerts?filter={{ .CommonLabels.alertname }}"
+            text: "AlertManager"
+
+  # ── Slack receivers ───────────────────────────────────────────────────────
+  - name: slack-default
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack-webhook-url
+        channel: "#alerts"
+        send_resolved: true
+        title: >-
+          {{ if eq .Status "firing" }}:fire:{{ else }}:white_check_mark:{{ end }}
+          [{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}
+        text: >-
+          *Severity:* {{ .CommonLabels.severity | toUpper }}
+          *Namespace:* {{ .CommonLabels.namespace }}
+          {{ range .Alerts }}• {{ .Annotations.summary }}{{ end }}
+        actions:
+          - type: button
+            text: "View Alert"
+            url: "{{ (index .Alerts 0).GeneratorURL }}"
+          - type: button
+            text: "Silence"
+            url: >-
+              {{ .ExternalURL }}/#/silences/new?filter=%7Balertname%3D%22{{ (index .Alerts 0).Labels.alertname }}%22%7D
+
+  - name: slack-critical
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack-webhook-url
+        channel: "#alerts-critical"
+        send_resolved: true
+        color: >-
+          {{ if eq .Status "firing" }}danger{{ else }}good{{ end }}
+        title: >-
+          {{ if eq .Status "firing" }}:rotating_light: CRITICAL{{ else }}:white_check_mark: RESOLVED{{ end }}
+          {{ .CommonLabels.alertname }}
+        text: >-
+          *Cluster:* {{ .CommonLabels.cluster }}
+          *Namespace:* {{ .CommonLabels.namespace }}
+          *Service:* {{ .CommonLabels.service }}
+          {{ range .Alerts }}
+          > {{ .Annotations.description }}
+          Runbook: {{ .Annotations.runbook_url }}
+          {{ end }}
+
+  - name: slack-slo-alerts
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack-webhook-url
+        channel: "#slo-alerts"
+        send_resolved: true
+        color: "danger"
+        title: ":chart_with_downwards_trend: SLO Alert: {{ .CommonLabels.alertname }}"
+        text: >-
+          *Service:* {{ .CommonLabels.service }}
+          *Burn Rate:* {{ (index .Alerts 0).Annotations.burn_rate }}x
+          *Error Budget:* {{ (index .Alerts 0).Annotations.error_budget_remaining }}% remaining
+          *Window:* {{ (index .Alerts 0).Annotations.window }}
+          Runbook: {{ (index .Alerts 0).Annotations.runbook_url }}
+
+  - name: slack-warnings
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack-webhook-url
+        channel: "#alerts-warning"
+        send_resolved: false
+        title: ":warning: {{ .CommonLabels.alertname }} ({{ .CommonLabels.namespace }})"
+        text: >-
+          {{ range .Alerts }}• {{ .Annotations.summary }}{{ end }}
+
+  - name: slack-digest
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack-webhook-url
+        channel: "#alerts-digest"
+        send_resolved: false
+        title: "Info: {{ .CommonLabels.alertname }}"
+        text: >-
+          {{ range .Alerts }}• {{ .Annotations.summary }}{{ end }}
+
+  - name: slack-finops
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack-finops-webhook-url
+        channel: "#finops-alerts"
+        send_resolved: true
+        color: >-
+          {{ if eq .Status "firing" }}warning{{ else }}good{{ end }}
+        title: ":money_with_wings: FinOps Alert: {{ .CommonLabels.alertname }}"
+        text: >-
+          {{ range .Alerts }}• {{ .Annotations.summary }}{{ end }}
+
+  # ── Team-specific Slack ───────────────────────────────────────────────────
+  - name: slack-team-payments
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack-webhook-payments
+        channel: "#payments-alerts"
+        send_resolved: true
+        title: "{{ .CommonLabels.alertname }} ({{ .CommonLabels.namespace }})"
+        text: >-
+          {{ range .Alerts }}• {{ .Annotations.summary }}{{ end }}
+
+  - name: slack-team-platform
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack-webhook-platform
+        channel: "#platform-alerts"
+        send_resolved: true
+        title: "{{ .CommonLabels.alertname }} ({{ .CommonLabels.namespace }})"
+        text: >-
+          {{ range .Alerts }}• {{ .Annotations.summary }}{{ end }}
+
+  - name: slack-team-data
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack-webhook-data
+        channel: "#data-alerts"
+        send_resolved: true
+        title: "{{ .CommonLabels.alertname }} ({{ .CommonLabels.namespace }})"
+        text: >-
+          {{ range .Alerts }}• {{ .Annotations.summary }}{{ end }}
+
+  # ── Dead man's switch ─────────────────────────────────────────────────────
+  # Uses a webhook to a health check service (e.g., healthchecks.io).
+  # If the Watchdog alert stops firing (cluster outage), the service pings PagerDuty.
+  - name: deadman-switch
+    webhook_configs:
+      - url_file: /etc/alertmanager/secrets/deadman-webhook-url
+        send_resolved: false
+        http_config:
+          follow_redirects: true
