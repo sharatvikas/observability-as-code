@@ -11,165 +11,242 @@ evaluation_interval: 1m
 
 tests:
   ##
-  ## KubePodCrashLooping
+  ## PodCrashLoopBackOff — rate(restarts[15m]) * 60 > 1, for 5m
   ##
 
-  - name: KubePodCrashLooping fires when restart rate is high
+  - name: PodCrashLoopBackOff fires when restart rate is high
     interval: 1m
     input_series:
+      # 5 restarts/minute — far above the 1/min threshold
       - series: 'kube_pod_container_status_restarts_total{namespace="production", pod="payment-api-abc", container="api", job="kube-state-metrics"}'
-        values: '0 5 10 15 20 25 30 35 40 45 50 55 60 65'
+        values: '0 5 10 15 20 25 30 35 40 45 50 55 60 65 70 75'
 
     alert_rule_test:
       - eval_time: 15m
-        alertname: KubePodCrashLooping
+        alertname: PodCrashLoopBackOff
         exp_alerts:
           - exp_labels:
               namespace: production
               pod: payment-api-abc
               container: api
-              severity: critical
+              job: kube-state-metrics
+              severity: warning
+              category: kubernetes
             exp_annotations:
-              summary: "Pod payment-api-abc is crash looping"
+              summary: "Pod payment-api-abc is crash-looping in production"
+              description: "Pod production/payment-api-abc container api is restarting 5 times/minute.\n"
+              runbook: "https://runbooks.internal/k8s/crashloop"
+              dashboard: "https://grafana.internal/d/kubernetes-pods"
 
-  - name: KubePodCrashLooping does not fire for stable pod
+  - name: PodCrashLoopBackOff does not fire for stable pod
     interval: 1m
     input_series:
       - series: 'kube_pod_container_status_restarts_total{namespace="production", pod="stable-pod", container="app", job="kube-state-metrics"}'
-        values: '0 0 0 0 0 0 0 0 0 0 0 0 0 0'
+        values: '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0'
 
     alert_rule_test:
       - eval_time: 15m
-        alertname: KubePodCrashLooping
+        alertname: PodCrashLoopBackOff
         exp_alerts: []
 
   ##
-  ## KubePodNotReady
+  ## PodNotReady — pod stuck in Pending/Unknown, for 15m
   ##
 
-  - name: KubePodNotReady fires when pod is not ready for 5 minutes
+  - name: PodNotReady fires when pod is stuck Pending for 15 minutes
     interval: 1m
     input_series:
       - series: 'kube_pod_status_phase{namespace="staging", pod="checkout-abc", phase="Pending", job="kube-state-metrics"}'
-        values: '1 1 1 1 1 1 1 1 1 1'
+        values: '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
       - series: 'kube_pod_status_phase{namespace="staging", pod="checkout-abc", phase="Running", job="kube-state-metrics"}'
-        values: '0 0 0 0 0 0 0 0 0 0'
+        values: '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0'
 
     alert_rule_test:
-      - eval_time: 5m
-        alertname: KubePodNotReady
+      - eval_time: 16m
+        alertname: PodNotReady
         exp_alerts:
           - exp_labels:
               namespace: staging
               pod: checkout-abc
+              phase: Pending
               severity: warning
+              category: kubernetes
+            exp_annotations:
+              summary: "Pod checkout-abc stuck in Pending"
+              description: "Pod staging/checkout-abc has been in Pending state for more than 15 minutes.\n"
+              runbook: "https://runbooks.internal/k8s/pending-pod"
 
-  - name: KubePodNotReady does not fire for running pod
+  - name: PodNotReady does not fire for running pod
     interval: 1m
     input_series:
       - series: 'kube_pod_status_phase{namespace="production", pod="healthy-pod", phase="Running", job="kube-state-metrics"}'
-        values: '1 1 1 1 1 1 1 1 1 1'
+        values: '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
 
     alert_rule_test:
-      - eval_time: 10m
-        alertname: KubePodNotReady
+      - eval_time: 16m
+        alertname: PodNotReady
         exp_alerts: []
 
   ##
-  ## KubeDeploymentReplicasMismatch
+  ## DeploymentReplicasMismatch — desired != available with no rollout activity, for 15m
   ##
 
-  - name: KubeDeploymentReplicasMismatch fires when replicas are unavailable
+  - name: DeploymentReplicasMismatch fires when replicas are unavailable
     interval: 1m
     input_series:
       - series: 'kube_deployment_spec_replicas{namespace="production", deployment="api-server", job="kube-state-metrics"}'
-        values: '3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3'
-      - series: 'kube_deployment_status_replicas_ready{namespace="production", deployment="api-server", job="kube-state-metrics"}'
-        values: '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+        values: '3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3'
+      - series: 'kube_deployment_status_available_replicas{namespace="production", deployment="api-server", job="kube-state-metrics"}'
+        values: '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+      # Constant — no rollout in progress, so the mismatch is real
+      - series: 'kube_deployment_status_replicas_updated{namespace="production", deployment="api-server", job="kube-state-metrics"}'
+        values: '3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3'
 
     alert_rule_test:
-      - eval_time: 15m
-        alertname: KubeDeploymentReplicasMismatch
+      - eval_time: 16m
+        alertname: DeploymentReplicasMismatch
         exp_alerts:
           - exp_labels:
               namespace: production
               deployment: api-server
+              job: kube-state-metrics
               severity: warning
+              category: kubernetes
+            exp_annotations:
+              summary: "Deployment api-server has mismatched replicas"
+              description: "Deployment production/api-server wants 3 replicas but has fewer available for 15+ minutes.\n"
+              runbook: "https://runbooks.internal/k8s/replica-mismatch"
 
-  - name: KubeDeploymentReplicasMismatch does not fire during rolling update
+  - name: DeploymentReplicasMismatch does not fire when all replicas are available
     interval: 1m
     input_series:
       - series: 'kube_deployment_spec_replicas{namespace="production", deployment="healthy", job="kube-state-metrics"}'
-        values: '3 3 3 3 3'
-      - series: 'kube_deployment_status_replicas_ready{namespace="production", deployment="healthy", job="kube-state-metrics"}'
-        values: '3 3 3 3 3'
+        values: '3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3'
+      - series: 'kube_deployment_status_available_replicas{namespace="production", deployment="healthy", job="kube-state-metrics"}'
+        values: '3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3'
+      - series: 'kube_deployment_status_replicas_updated{namespace="production", deployment="healthy", job="kube-state-metrics"}'
+        values: '3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3'
 
     alert_rule_test:
-      - eval_time: 5m
-        alertname: KubeDeploymentReplicasMismatch
+      - eval_time: 16m
+        alertname: DeploymentReplicasMismatch
+        exp_alerts: []
+
+  - name: DeploymentReplicasMismatch does not fire during an active rollout
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_spec_replicas{namespace="production", deployment="rolling", job="kube-state-metrics"}'
+        values: '3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3'
+      - series: 'kube_deployment_status_available_replicas{namespace="production", deployment="rolling", job="kube-state-metrics"}'
+        values: '1 1 1 2 2 2 3 2 2 1 1 2 2 2 1 1 1'
+      # replicas_updated keeps changing — rollout in progress, alert suppressed
+      - series: 'kube_deployment_status_replicas_updated{namespace="production", deployment="rolling", job="kube-state-metrics"}'
+        values: '0 1 1 2 2 3 3 2 1 1 2 2 3 3 2 1 1'
+
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: DeploymentReplicasMismatch
         exp_alerts: []
 
   ##
-  ## KubeNodeNotReady
+  ## NodeNotReady — Ready condition false, for 5m
   ##
 
-  - name: KubeNodeNotReady fires when node is not ready
+  - name: NodeNotReady fires when node is not ready
     interval: 1m
     input_series:
       - series: 'kube_node_status_condition{node="ip-10-0-1-234", condition="Ready", status="true", job="kube-state-metrics"}'
-        values: '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0'
-      - series: 'kube_node_status_condition{node="ip-10-0-1-234", condition="Ready", status="false", job="kube-state-metrics"}'
-        values: '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+        values: '0 0 0 0 0 0 0 0'
 
     alert_rule_test:
-      - eval_time: 15m
-        alertname: KubeNodeNotReady
+      - eval_time: 6m
+        alertname: NodeNotReady
         exp_alerts:
           - exp_labels:
               node: ip-10-0-1-234
+              condition: Ready
+              status: "true"
+              job: kube-state-metrics
               severity: critical
+              category: kubernetes
+            exp_annotations:
+              summary: "Node ip-10-0-1-234 is not ready"
+              description: "Node ip-10-0-1-234 has been in NotReady state for 5+ minutes. Check node health, kubelet logs, and EC2 instance status.\n"
+              runbook: "https://runbooks.internal/k8s/node-not-ready"
 
-  - name: KubeNodeNotReady does not fire for healthy node
+  - name: NodeNotReady does not fire for healthy node
     interval: 1m
     input_series:
       - series: 'kube_node_status_condition{node="ip-10-0-2-100", condition="Ready", status="true", job="kube-state-metrics"}'
-        values: '1 1 1 1 1 1 1 1 1 1'
+        values: '1 1 1 1 1 1 1 1'
 
     alert_rule_test:
-      - eval_time: 10m
-        alertname: KubeNodeNotReady
+      - eval_time: 6m
+        alertname: NodeNotReady
         exp_alerts: []
 
   ##
-  ## KubePersistentVolumeFillingUp
+  ## PVCNearFull / PVCFull — volume utilization thresholds
   ##
 
-  - name: KubePersistentVolumeFillingUp fires at 85% full
+  - name: PVCNearFull fires at 85% full but PVCFull does not
     interval: 1m
     input_series:
       - series: 'kubelet_volume_stats_used_bytes{namespace="data", persistentvolumeclaim="postgres-pvc", job="kubelet"}'
-        values: '85e9 85e9 85e9 85e9 85e9 85e9 85e9 85e9 85e9 85e9 85e9 85e9'
+        values: '85e9 85e9 85e9 85e9 85e9 85e9 85e9 85e9'
       - series: 'kubelet_volume_stats_capacity_bytes{namespace="data", persistentvolumeclaim="postgres-pvc", job="kubelet"}'
-        values: '100e9 100e9 100e9 100e9 100e9 100e9 100e9 100e9 100e9 100e9 100e9 100e9'
+        values: '100e9 100e9 100e9 100e9 100e9 100e9 100e9 100e9'
 
     alert_rule_test:
-      - eval_time: 10m
-        alertname: KubePersistentVolumeFillingUp
+      - eval_time: 6m
+        alertname: PVCNearFull
         exp_alerts:
           - exp_labels:
               namespace: data
               persistentvolumeclaim: postgres-pvc
+              job: kubelet
               severity: warning
+              category: kubernetes
+            exp_annotations:
+              summary: "PVC postgres-pvc is 85% full"
+              description: "PVC data/postgres-pvc is 85% full. Expand the volume or clean up data.\n"
+              runbook: "https://runbooks.internal/k8s/pvc-full"
+      - eval_time: 6m
+        alertname: PVCFull
+        exp_alerts: []
 
-  - name: KubePersistentVolumeFillingUp does not fire below threshold
+  - name: PVCFull fires at 96% full
+    interval: 1m
+    input_series:
+      - series: 'kubelet_volume_stats_used_bytes{namespace="data", persistentvolumeclaim="kafka-pvc", job="kubelet"}'
+        values: '96e9 96e9 96e9 96e9'
+      - series: 'kubelet_volume_stats_capacity_bytes{namespace="data", persistentvolumeclaim="kafka-pvc", job="kubelet"}'
+        values: '100e9 100e9 100e9 100e9'
+
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: PVCFull
+        exp_alerts:
+          - exp_labels:
+              namespace: data
+              persistentvolumeclaim: kafka-pvc
+              job: kubelet
+              severity: critical
+              category: kubernetes
+            exp_annotations:
+              summary: "PVC kafka-pvc is critically full"
+              description: "PVC data/kafka-pvc is 96% full. Immediate action required.\n"
+              runbook: "https://runbooks.internal/k8s/pvc-full"
+
+  - name: PVCNearFull does not fire below threshold
     interval: 1m
     input_series:
       - series: 'kubelet_volume_stats_used_bytes{namespace="data", persistentvolumeclaim="small-pvc", job="kubelet"}'
-        values: '50e9 50e9 50e9 50e9 50e9 50e9 50e9 50e9 50e9 50e9'
+        values: '50e9 50e9 50e9 50e9 50e9 50e9 50e9 50e9'
       - series: 'kubelet_volume_stats_capacity_bytes{namespace="data", persistentvolumeclaim="small-pvc", job="kubelet"}'
-        values: '100e9 100e9 100e9 100e9 100e9 100e9 100e9 100e9 100e9 100e9'
+        values: '100e9 100e9 100e9 100e9 100e9 100e9 100e9 100e9'
 
     alert_rule_test:
-      - eval_time: 10m
-        alertname: KubePersistentVolumeFillingUp
+      - eval_time: 6m
+        alertname: PVCNearFull
         exp_alerts: []

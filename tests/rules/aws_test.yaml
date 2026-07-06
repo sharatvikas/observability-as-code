@@ -17,10 +17,11 @@ tests:
   - name: ALBHighErrorRate fires when 5xx rate exceeds 5%
     interval: 1m
     input_series:
+      # Counters: 60 5xx/min out of 1000 req/min = 6% error rate
       - series: 'aws_applicationelb_httpcode_target_5_xx_count_sum{load_balancer="app/payments-alb/abc123"}'
-        values: '60 60 60 60 60 60 60 60'
+        values: '0 60 120 180 240 300 360 420'
       - series: 'aws_applicationelb_request_count_sum{load_balancer="app/payments-alb/abc123"}'
-        values: '1000 1000 1000 1000 1000 1000 1000 1000'
+        values: '0 1000 2000 3000 4000 5000 6000 7000'
 
     alert_rule_test:
       - eval_time: 7m
@@ -32,14 +33,17 @@ tests:
               category: aws
             exp_annotations:
               summary: "ALB app/payments-alb/abc123 has >5% 5xx error rate"
+              description: "ALB app/payments-alb/abc123 is returning 6% 5xx errors. Check target group health, application logs, and recent deployments.\n"
+              runbook: "https://runbooks.internal/aws/alb-errors"
 
   - name: ALBHighErrorRate does not fire when error rate is below threshold
     interval: 1m
     input_series:
+      # Counters: 2 5xx/min out of 1000 req/min = 0.2% error rate
       - series: 'aws_applicationelb_httpcode_target_5_xx_count_sum{load_balancer="app/healthy-alb/def456"}'
-        values: '2 2 2 2 2 2 2 2'
+        values: '0 2 4 6 8 10 12 14'
       - series: 'aws_applicationelb_request_count_sum{load_balancer="app/healthy-alb/def456"}'
-        values: '1000 1000 1000 1000 1000 1000 1000 1000'
+        values: '0 1000 2000 3000 4000 5000 6000 7000'
 
     alert_rule_test:
       - eval_time: 7m
@@ -64,6 +68,9 @@ tests:
               load_balancer: "app/slow-alb/abc"
               severity: warning
               category: aws
+            exp_annotations:
+              summary: "ALB app/slow-alb/abc P99 latency > 1s"
+              description: "ALB app/slow-alb/abc P99 target response time is 1.5s. Investigate backend service performance.\n"
 
   - name: ALBHighLatency does not fire when latency is acceptable
     interval: 1m
@@ -96,6 +103,8 @@ tests:
               category: aws
             exp_annotations:
               summary: "RDS payments-db-prod CPU > 80%"
+              description: "RDS instance payments-db-prod CPU at 88% for 15+ minutes. Check for long-running queries or missing indexes.\n"
+              runbook: "https://runbooks.internal/aws/rds-high-cpu"
 
   - name: RDSHighCPU does not fire for brief CPU spikes
     interval: 1m
@@ -127,6 +136,10 @@ tests:
               dbinstance_identifier: payments-db-prod
               severity: warning
               category: aws
+            exp_annotations:
+              summary: "RDS payments-db-prod free storage < 10GB"
+              description: "RDS instance payments-db-prod has 5GiB free storage. Expand storage or clean up data.\n"
+              runbook: "https://runbooks.internal/aws/rds-storage"
 
   - name: RDSLowFreeStorageSpace does not fire when storage is adequate
     interval: 1m
@@ -160,6 +173,8 @@ tests:
               category: aws
             exp_annotations:
               summary: "RDS read replica payments-db-replica-1 lag > 30s"
+              description: "Read replica payments-db-replica-1 is 70s behind the primary. Read queries may return stale data.\n"
+              runbook: "https://runbooks.internal/aws/rds-replica-lag"
 
   - name: RDSReplicationLag does not fire when replica is in sync
     interval: 1m
@@ -190,6 +205,10 @@ tests:
               instance_id: i-0abc12345
               severity: critical
               category: aws
+            exp_annotations:
+              summary: "EC2 instance i-0abc12345 status check failed"
+              description: "Instance i-0abc12345 has failed status checks. May require stop/start or instance retirement.\n"
+              runbook: "https://runbooks.internal/aws/ec2-status-check"
 
   - name: EC2StatusCheckFailed does not fire when instance is healthy
     interval: 1m
@@ -222,6 +241,8 @@ tests:
               category: aws
             exp_annotations:
               summary: "SQS queue payments-processing-queue has >10k messages"
+              description: "Queue payments-processing-queue has 15k messages. Consumer may be down or too slow.\n"
+              runbook: "https://runbooks.internal/aws/sqs-depth"
 
   - name: SQSQueueDepthHigh does not fire for healthy queue
     interval: 1m
@@ -254,6 +275,8 @@ tests:
               category: aws
             exp_annotations:
               summary: "Dead letter queue payments-processing-queue-dlq has messages"
+              description: "5 messages in dead letter queue payments-processing-queue-dlq. Investigate failed message processing.\n"
+              runbook: "https://runbooks.internal/aws/sqs-dlq"
 
   - name: SQSDeadLetterQueueMessages does not fire for empty DLQ
     interval: 1m

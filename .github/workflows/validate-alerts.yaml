@@ -5,10 +5,16 @@ on:
     paths:
       - "alerts/**"
       - "recording-rules/**"
+      - "tests/**"
+      - "alertmanager/**"
+      - "dashboards/**"
   pull_request:
     paths:
       - "alerts/**"
       - "recording-rules/**"
+      - "tests/**"
+      - "alertmanager/**"
+      - "dashboards/**"
 
 jobs:
   promtool-check:
@@ -44,6 +50,44 @@ jobs:
           else
             echo "No unit tests found — skipping"
           fi
+
+  amtool-check:
+    name: amtool check-config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Alertmanager
+        run: |
+          AM_VERSION="0.27.0"
+          curl -sL "https://github.com/prometheus/alertmanager/releases/download/v${AM_VERSION}/alertmanager-${AM_VERSION}.linux-amd64.tar.gz" \
+            | tar -xz --strip-components=1 -C /usr/local/bin alertmanager-${AM_VERSION}.linux-amd64/amtool
+
+      - name: Check Alertmanager config
+        run: amtool check-config alertmanager/alertmanager.yaml
+
+  dashboard-json:
+    name: Dashboard JSON validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate dashboard JSON structure
+        run: |
+          for f in dashboards/json/*.json; do
+            echo "Checking $f..."
+            jq -e '.title and .uid and (.panels | length > 0)' "$f" > /dev/null
+            # Every non-row panel must have at least one query target
+            bad=$(jq '[.panels[] | select(.type != "row" and .type != "text") | select((.targets // []) | length == 0)] | length' "$f")
+            if [ "$bad" != "0" ]; then
+              echo "FAIL: $f has $bad panels without query targets"
+              exit 1
+            fi
+          done
+          # Dashboard UIDs must be unique
+          dupes=$(jq -s '[.[].uid] | group_by(.) | map(select(length > 1)) | length' dashboards/json/*.json)
+          [ "$dupes" = "0" ] || { echo "FAIL: duplicate dashboard uids"; exit 1; }
+          echo "OK: all dashboards valid"
 
   jsonnet-lint:
     name: Jsonnet dashboard lint

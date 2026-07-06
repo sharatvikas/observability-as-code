@@ -33,9 +33,9 @@ groups:
         annotations:
           summary: "{{ $labels.job }} SLO fast burn — page immediately"
           description: >
-            {{ $labels.job }} is burning error budget at {{ $value | humanize }}x the
-            sustainable rate. At this rate, the monthly 99.9% SLO will be exhausted
-            in less than 2 hours.
+            {{ $labels.job }} 1h error rate is {{ $value | humanizePercentage }} —
+            above the 14.4x fast-burn threshold (1.44%). At this rate, the monthly
+            99.9% SLO budget will be exhausted in under 2 hours.
           runbook: "https://runbooks.internal/slo/fast-burn"
           dashboard: "https://grafana.internal/d/slo-overview?var-job={{ $labels.job }}"
 

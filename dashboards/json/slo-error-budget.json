@@ -1,0 +1,679 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "enable": true,
+        "expr": "ALERTS{alertstate=\"firing\", category=\"slo\", job=~\"$job\"}",
+        "iconColor": "red",
+        "name": "Firing SLO Alerts",
+        "titleFormat": "{{alertname}} ({{job}})"
+      }
+    ]
+  },
+  "description": "SLO burn rate and error budget tracking. Multi-window, multi-burn-rate panels matching the alert policy in alerts/slo.yaml (Google SRE Workbook method). Availability SLO: 99.9% / 30d. Latency SLO: 95% of requests < 200ms.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [
+    {
+      "title": "Service Golden Signals",
+      "type": "link",
+      "url": "/d/service-golden-signals/service-golden-signals-red",
+      "targetBlank": false,
+      "icon": "dashboard",
+      "tags": []
+    },
+    {
+      "title": "Kubernetes Cluster Health",
+      "type": "link",
+      "url": "/d/kubernetes-cluster-health/kubernetes-cluster-health",
+      "targetBlank": false,
+      "icon": "dashboard",
+      "tags": []
+    }
+  ],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "panels": [],
+      "title": "Error Budget Status — Availability SLO 99.9% / 30d",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Measured availability over the trailing 30 days: 1 - (5xx / total). SLO target is 99.9%.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "decimals": 3,
+          "mappings": [],
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 99.5 },
+              { "color": "green", "value": 99.9 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "pluginVersion": "10.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "100 * (1 - (sum by (job) (increase(http_requests_total{job=~\"$job\", status=~\"5..\"}[30d])) / sum by (job) (increase(http_requests_total{job=~\"$job\"}[30d]))))",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Availability (30d)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Fraction of the 30-day error budget still unspent (recorded rule job:error_budget_remaining:ratio_rate30d). Values below 0% mean the SLO is already violated for this window.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "decimals": 1,
+          "mappings": [],
+          "max": 100,
+          "min": -25,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 10 },
+              { "color": "yellow", "value": 25 },
+              { "color": "green", "value": 50 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 8, "x": 6, "y": 1 },
+      "id": 2,
+      "options": {
+        "minVizHeight": 75,
+        "minVizWidth": 75,
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "sizing": "auto"
+      },
+      "pluginVersion": "10.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "100 * job:error_budget_remaining:ratio_rate30d{job=~\"$job\"}",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Error Budget Remaining (30d)",
+      "type": "gauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Error budget expressed in downtime minutes. A 99.9% / 30d SLO allows 43.2 minutes of full outage per month.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "decimals": 1,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "green", "value": 20 }
+            ]
+          },
+          "unit": "m"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 5, "x": 14, "y": 1 },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "pluginVersion": "10.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "43.2 * job:error_budget_remaining:ratio_rate30d{job=~\"$job\"}",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Budget Minutes Remaining",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Current burn rate over the 1h window: error_rate / (1 - SLO). 1x = budget lasts exactly 30 days. 14.4x = fast-burn page threshold.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "decimals": 2,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "orange", "value": 6 },
+              { "color": "red", "value": 14.4 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 5, "x": 19, "y": 1 },
+      "id": 4,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "pluginVersion": "10.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "job:request_error_rate:ratio_rate1h{job=~\"$job\"} / 0.001",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Burn Rate (1h)",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "id": 101,
+      "panels": [],
+      "title": "Multi-Window Burn Rate — Availability",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Fast-burn windows (5m + 1h). SLOAvailabilityFastBurn pages when BOTH windows exceed 14.4x — the short window confirms the burn is still happening, the long window filters blips. 14.4x burn exhausts the monthly budget in ~2 days; 2% of budget is spent in 1 hour.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "burn rate (x)",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "line+area" }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "transparent", "value": null },
+              { "color": "red", "value": 14.4 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 7 },
+      "id": 5,
+      "options": {
+        "legend": { "calcs": ["mean", "lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "pluginVersion": "10.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "job:request_error_rate:ratio_rate5m{job=~\"$job\"} / 0.001",
+          "legendFormat": "{{job}} — 5m",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "job:request_error_rate:ratio_rate1h{job=~\"$job\"} / 0.001",
+          "legendFormat": "{{job}} — 1h",
+          "refId": "B"
+        }
+      ],
+      "title": "Fast Burn (5m / 1h) — page at 14.4x",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Slow-burn windows (30m + 6h) and the 3d ticket window. SLOAvailabilitySlowBurn warns when both 30m and 6h exceed 6x (5% of budget in 6h). Sustained 3d burn above 1x means the budget will not last the month — SLOAvailabilityBudgetLow files a ticket.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "burn rate (x)",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "line" }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "transparent", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "orange", "value": 6 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 7 },
+      "id": 6,
+      "options": {
+        "legend": { "calcs": ["mean", "lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "pluginVersion": "10.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "job:request_error_rate:ratio_rate30m{job=~\"$job\"} / 0.001",
+          "legendFormat": "{{job}} — 30m",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "job:request_error_rate:ratio_rate6h{job=~\"$job\"} / 0.001",
+          "legendFormat": "{{job}} — 6h",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "job:request_error_rate:ratio_rate3d{job=~\"$job\"} / 0.001",
+          "legendFormat": "{{job}} — 3d",
+          "refId": "C"
+        }
+      ],
+      "title": "Slow Burn (30m / 6h / 3d) — warn at 6x, ticket at 1x",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Error budget remaining over time — the burn-down chart. A flat line means no errors; every dip is budget spent. Crossing 0% means the 99.9% SLO is violated for the trailing 30 days.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "budget remaining",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "opacity",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "line" }
+          },
+          "mappings": [],
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 25 },
+              { "color": "green", "value": 50 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 16 },
+      "id": 7,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "min"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "asc" }
+      },
+      "pluginVersion": "10.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "100 * job:error_budget_remaining:ratio_rate30d{job=~\"$job\"}",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Error Budget Burn-Down (30d window)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 },
+      "id": 102,
+      "panels": [],
+      "title": "Latency SLO — 95% of requests < 200ms",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Latency burn rate: fraction of requests slower than 200ms divided by the 5% latency error budget. Same multiwindow policy as availability: page at 14.4x (5m+1h), warn at 6x (30m+6h).",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "burn rate (x)",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "line" }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "transparent", "value": null },
+              { "color": "orange", "value": 6 },
+              { "color": "red", "value": 14.4 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 26 },
+      "id": 8,
+      "options": {
+        "legend": { "calcs": ["mean", "lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "pluginVersion": "10.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "job:request_latency_above_slo:ratio_rate5m{job=~\"$job\"} / 0.05",
+          "legendFormat": "{{job}} — 5m",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "job:request_latency_above_slo:ratio_rate1h{job=~\"$job\"} / 0.05",
+          "legendFormat": "{{job}} — 1h",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "job:request_latency_above_slo:ratio_rate6h{job=~\"$job\"} / 0.05",
+          "legendFormat": "{{job}} — 6h",
+          "refId": "C"
+        }
+      ],
+      "title": "Latency Burn Rate (5m / 1h / 6h)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Percentage of requests slower than the 200ms SLO threshold (1h window). The 5% line is the SLO boundary — staying under it means the latency SLO is met.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "line" }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 5 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 8, "x": 12, "y": 26 },
+      "id": 9,
+      "options": {
+        "legend": { "calcs": ["mean", "lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "pluginVersion": "10.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "100 * job:request_latency_above_slo:ratio_rate1h{job=~\"$job\"}",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Requests Slower Than 200ms (1h)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Fraction of the 30-day latency error budget still unspent. Budget = 5% of requests may exceed 200ms.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "decimals": 1,
+          "mappings": [],
+          "max": 100,
+          "min": -25,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 10 },
+              { "color": "yellow", "value": 25 },
+              { "color": "green", "value": 50 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 4, "x": 20, "y": 26 },
+      "id": 10,
+      "options": {
+        "minVizHeight": 75,
+        "minVizWidth": 75,
+        "orientation": "vertical",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "sizing": "auto"
+      },
+      "pluginVersion": "10.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "100 * (1 - ((1 - (sum by (job) (increase(http_request_duration_seconds_bucket{le=\"0.2\", job=~\"$job\"}[30d])) / sum by (job) (increase(http_request_duration_seconds_count{job=~\"$job\"}[30d])))) / 0.05))",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Latency Budget Remaining",
+      "type": "gauge"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 35 },
+      "id": 103,
+      "panels": [],
+      "title": "Alerting Policy Reference",
+      "type": "row"
+    },
+    {
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 36 },
+      "id": 11,
+      "options": {
+        "code": { "language": "plaintext", "showLineNumbers": false, "showMiniMap": false },
+        "content": "### Multi-window, multi-burn-rate policy (Google SRE Workbook, ch. 5)\n\n| Response | Budget consumed | Long window | Short window | Burn rate threshold | Alert |\n|----------|----------------|-------------|--------------|---------------------|-------|\n| **Page** | 2% in 1 hour | 1h | 5m | **14.4x** | `SLOAvailabilityFastBurn` / `SLOLatencyFastBurn` |\n| **Page** | 5% in 6 hours | 6h | 30m | **6x** | `SLOAvailabilitySlowBurn` / `SLOLatencySlowBurn` |\n| **Ticket** | 10% in 3 days | 3d | — | **1x** | `SLOAvailabilityBudgetLow` |\n\nBurn rate = error_rate / (1 - SLO). At 1x the monthly budget lasts exactly 30 days. Both windows must exceed the threshold for pages — the short window stops alerts firing long after the incident ended. Rules: `alerts/slo.yaml`, recorded series: `recording-rules/slo.yaml`.",
+        "mode": "markdown"
+      },
+      "pluginVersion": "10.4.0",
+      "title": "How to read this dashboard",
+      "type": "text"
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": ["slo", "error-budget", "burn-rate"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "Prometheus", "value": "prometheus" },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "current": {},
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "definition": "label_values(job:request_error_rate:ratio_rate5m, job)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Service (job)",
+        "multi": true,
+        "name": "job",
+        "options": [],
+        "query": { "qryType": 1, "query": "label_values(job:request_error_rate:ratio_rate5m, job)", "refId": "PrometheusVariableQueryEditor-VariableQuery" },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "SLO / Error Budget",
+  "uid": "slo-error-budget",
+  "version": 1,
+  "weekStart": ""
+}

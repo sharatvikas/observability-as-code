@@ -86,20 +86,43 @@ route:
       group_interval: 15m
       repeat_interval: 8h
 
-    # ── Info: digest only ──────────────────────────────────────────────────
+    # ── Info: digest only, business hours only ────────────────────────────
+    # Notifications are held (not dropped) until the interval opens.
     - matchers:
         - severity = "info"
       receiver: slack-digest
       group_wait: 5m
       group_interval: 1h
       repeat_interval: 24h
+      active_time_intervals:
+        - business-hours
 
-    # ── FinOps anomaly alerts ─────────────────────────────────────────────
+    # ── FinOps anomaly alerts: nobody fixes a budget at midnight ──────────
     - matchers:
         - alertname =~ "AWSCostAnomaly|AWSBudgetExceeded|AWSForecastOverBudget"
       receiver: slack-finops
       group_wait: 5m
       repeat_interval: 6h
+      active_time_intervals:
+        - business-hours
+
+
+# ── Time intervals ───────────────────────────────────────────────────────────
+# Referenced by active_time_intervals / mute_time_intervals above.
+time_intervals:
+
+  - name: business-hours
+    time_intervals:
+      - weekdays: ["monday:friday"]
+        times:
+          - start_time: "09:00"
+            end_time: "18:00"
+        location: "America/Denver"
+
+  - name: weekends
+    time_intervals:
+      - weekdays: ["saturday", "sunday"]
+        location: "America/Denver"
 
 
 # ── Inhibition rules ─────────────────────────────────────────────────────────

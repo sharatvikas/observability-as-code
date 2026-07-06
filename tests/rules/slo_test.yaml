@@ -41,6 +41,9 @@ tests:
               window: "1h"
             exp_annotations:
               summary: "payments-api SLO fast burn — page immediately"
+              description: "payments-api 1h error rate is 2% — above the 14.4x fast-burn threshold (1.44%). At this rate, the monthly 99.9% SLO budget will be exhausted in under 2 hours.\n"
+              runbook: "https://runbooks.internal/slo/fast-burn"
+              dashboard: "https://grafana.internal/d/slo-overview?var-job=payments-api"
 
   - name: SLOAvailabilityFastBurn does not fire when only 1h window is elevated
     interval: 1m
@@ -94,6 +97,9 @@ tests:
               window: "6h"
             exp_annotations:
               summary: "payments-api SLO slow burn — investigate"
+              description: "payments-api is burning error budget at a sustained elevated rate. Error budget will be exhausted in ~5 days at this rate.\n"
+              runbook: "https://runbooks.internal/slo/slow-burn"
+              dashboard: "https://grafana.internal/d/slo-overview?var-job=payments-api"
 
   - name: SLOAvailabilitySlowBurn does not fire when error rate is below threshold
     interval: 1m
@@ -130,6 +136,7 @@ tests:
               window: "3d"
             exp_annotations:
               summary: "payments-api SLO error budget will be exhausted this month"
+              description: "payments-api 3-day error rate exceeds the 99.9% SLO threshold. Create a ticket to investigate and fix root causes before month end.\n"
 
   - name: SLOAvailabilityBudgetLow does not fire for healthy 3d error rate
     interval: 1m
@@ -166,6 +173,8 @@ tests:
               window: "1h"
             exp_annotations:
               summary: "payments-api latency SLO fast burn"
+              description: "payments-api is exceeding the 200ms latency threshold at 80% of requests — burning latency error budget fast.\n"
+              runbook: "https://runbooks.internal/slo/latency-burn"
 
   - name: SLOLatencyFastBurn does not fire for acceptable latency distribution
     interval: 1m
@@ -204,6 +213,8 @@ tests:
               window: "6h"
             exp_annotations:
               summary: "payments-api latency SLO slow burn"
+              description: "payments-api is exceeding the 200ms latency SLO at a sustained rate. Investigate query performance, database, or downstream service latency.\n"
+              runbook: "https://runbooks.internal/slo/latency-burn"
 
   - name: SLOLatencySlowBurn does not fire for healthy latency
     interval: 1m

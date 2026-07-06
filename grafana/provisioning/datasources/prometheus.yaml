@@ -1,0 +1,25 @@
+##
+## Grafana datasource provisioning.
+##
+## The dashboards in dashboards/json/ select their datasource through a
+## `datasource` template variable, so any Prometheus datasource works —
+## this file just guarantees one exists with a stable uid on fresh installs.
+##
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus-operated.monitoring.svc.cluster.local:9090
+    isDefault: true
+    jsonData:
+      httpMethod: POST
+      timeInterval: 30s # matches the Prometheus scrape interval
+      incrementalQuerying: true
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+    editable: false

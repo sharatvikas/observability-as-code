@@ -1,0 +1,31 @@
+##
+## Grafana dashboard provisioning — file provider.
+##
+## Mount this file at /etc/grafana/provisioning/dashboards/observability.yaml
+## and mount the repo's dashboards/json/ directory at
+## /var/lib/grafana/dashboards/observability.
+##
+## Grafana watches the directory and hot-reloads dashboards on change, so a
+## CI job that syncs dashboards/json/ into the volume is all that is needed
+## to deploy — no clicking around in the UI, no drift.
+##
+## Kubernetes example (kube-prometheus-stack / grafana helm chart):
+##   kubectl create configmap grafana-dashboards-observability \
+##     --from-file=dashboards/json/ -n monitoring
+## then reference the configmap via the chart's `dashboardsConfigMaps` value.
+##
+
+apiVersion: 1
+
+providers:
+  - name: observability-as-code
+    orgId: 1
+    folder: Observability
+    folderUid: observability
+    type: file
+    disableDeletion: true # provisioned dashboards can't be deleted from the UI
+    updateIntervalSeconds: 30
+    allowUiUpdates: false # the repo is the source of truth, not the UI
+    options:
+      path: /var/lib/grafana/dashboards/observability
+      foldersFromFilesStructure: false
