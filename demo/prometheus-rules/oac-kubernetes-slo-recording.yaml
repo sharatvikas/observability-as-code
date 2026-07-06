@@ -1,0 +1,218 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: oac-kubernetes-slo-recording
+  namespace: monitoring
+  labels:
+    release: kube-prometheus
+    app.kubernetes.io/part-of: observability-as-code
+spec:
+  ##
+  ## Recording Rules: Kubernetes SLO Metrics
+  ##
+  ## Pre-computes burn rates, availability, and error budget ratios for
+  ## services running in Kubernetes. Consumed by the kubernetes-slo.libsonnet
+  ## dashboard and Alertmanager SLO alerts.
+  ##
+  ## These rules use kube-state-metrics + prometheus-adapter naming conventions.
+  ##
+  ## Install:
+  ##   kubectl apply -f kubernetes-slo.yaml -n monitoring
+  ##   # Or include in kube-prometheus-stack values.yaml under additionalPrometheusRules
+  ##
+
+  groups:
+
+    # ─── Service Error Rate Recording Rules ──────────────────────────────────────
+
+    - name: kubernetes_service_error_rate
+      interval: 30s
+      rules:
+        # 5-minute error rate per namespace/deployment
+        - record: namespace_deployment:http_request_error_rate:ratio_rate5m
+          expr: |
+            sum by (namespace, deployment) (
+              rate(http_requests_total{status_code=~"5.."}[5m])
+            )
+            /
+            sum by (namespace, deployment) (
+              rate(http_requests_total[5m])
+            )
+
+        # 30-minute error rate
+        - record: namespace_deployment:http_request_error_rate:ratio_rate30m
+          expr: |
+            sum by (namespace, deployment) (
+              rate(http_requests_total{status_code=~"5.."}[30m])
+            )
+            /
+            sum by (namespace, deployment) (
+              rate(http_requests_total[30m])
+            )
+
+        # 1-hour error rate
+        - record: namespace_deployment:http_request_error_rate:ratio_rate1h
+          expr: |
+            sum by (namespace, deployment) (
+              rate(http_requests_total{status_code=~"5.."}[1h])
+            )
+            /
+            sum by (namespace, deployment) (
+              rate(http_requests_total[1h])
+            )
+
+        # 6-hour error rate
+        - record: namespace_deployment:http_request_error_rate:ratio_rate6h
+          expr: |
+            sum by (namespace, deployment) (
+              rate(http_requests_total{status_code=~"5.."}[6h])
+            )
+            /
+            sum by (namespace, deployment) (
+              rate(http_requests_total[6h])
+            )
+
+    # ─── Burn Rate Rules (error_rate / SLO_error_budget) ─────────────────────────
+
+    - name: kubernetes_slo_burn_rate
+      interval: 30s
+      rules:
+        # Fast burn rate (1h window / 0.001 error budget for 99.9% SLO)
+        - record: namespace_deployment:http_request_error_burn_rate:ratio_rate1h
+          expr: |
+            namespace_deployment:http_request_error_rate:ratio_rate1h
+            / 0.001
+
+        # Slow burn rate (6h window)
+        - record: namespace_deployment:http_request_error_burn_rate:ratio_rate6h
+          expr: |
+            namespace_deployment:http_request_error_rate:ratio_rate6h
+            / 0.001
+
+        # Medium window (30m)
+        - record: namespace_deployment:http_request_error_burn_rate:ratio_rate30m
+          expr: |
+            namespace_deployment:http_request_error_rate:ratio_rate30m
+            / 0.001
+
+    # ─── Error Budget Remaining ──────────────────────────────────────────────────
+
+    - name: kubernetes_slo_budget
+      interval: 5m
+      rules:
+        # Error budget remaining as a ratio (1.0 = full budget, 0 = exhausted)
+        - record: namespace_deployment:slo_error_budget_remaining:ratio_30d
+          expr: |
+            1 - (
+              sum by (namespace, deployment) (
+                increase(http_requests_total{status_code=~"5.."}[30d])
+              )
+              /
+              sum by (namespace, deployment) (
+                increase(http_requests_total[30d])
+              )
+            ) / 0.001
+
+        # Error budget consumed (inverse, as percentage)
+        - record: namespace_deployment:slo_error_budget_consumed:pct_30d
+          expr: |
+            clamp_max(
+              (
+                sum by (namespace, deployment) (
+                  increase(http_requests_total{status_code=~"5.."}[30d])
+                )
+                /
+                sum by (namespace, deployment) (
+                  increase(http_requests_total[30d])
+                )
+              ) / 0.001 * 100,
+              100
+            )
+
+    # ─── Latency Recording Rules ──────────────────────────────────────────────────
+
+    - name: kubernetes_latency
+      interval: 30s
+      rules:
+        # p50 latency per namespace/deployment (5m window)
+        - record: namespace_deployment:http_request_duration_p50:seconds_5m
+          expr: |
+            histogram_quantile(0.50,
+              sum by (namespace, deployment, le) (
+                rate(http_request_duration_seconds_bucket[5m])
+              )
+            )
+
+        # p95 latency
+        - record: namespace_deployment:http_request_duration_p95:seconds_5m
+          expr: |
+            histogram_quantile(0.95,
+              sum by (namespace, deployment, le) (
+                rate(http_request_duration_seconds_bucket[5m])
+              )
+            )
+
+        # p99 latency
+        - record: namespace_deployment:http_request_duration_p99:seconds_5m
+          expr: |
+            histogram_quantile(0.99,
+              sum by (namespace, deployment, le) (
+                rate(http_request_duration_seconds_bucket[5m])
+              )
+            )
+
+        # Fraction of requests above 500ms latency SLO
+        - record: namespace_deployment:http_request_latency_above_500ms:ratio_rate5m
+          expr: |
+            sum by (namespace, deployment) (
+              rate(http_request_duration_seconds_bucket{le="0.5"}[5m])
+            )
+            /
+            sum by (namespace, deployment) (
+              rate(http_request_duration_seconds_bucket{le="+Inf"}[5m])
+            )
+
+    # ─── Pod Health Recording Rules ──────────────────────────────────────────────
+
+    - name: kubernetes_pod_health
+      interval: 30s
+      rules:
+        # Pod availability ratio per namespace/deployment
+        - record: namespace_deployment:pod_availability:ratio
+          expr: |
+            sum by (namespace, deployment) (
+              kube_deployment_status_replicas_available
+            )
+            /
+            sum by (namespace, deployment) (
+              kube_deployment_spec_replicas
+            )
+
+        # Container restart rate (increases per 5m)
+        - record: namespace_pod_container:container_restarts:increase5m
+          expr: |
+            sum by (namespace, pod, container) (
+              increase(kube_pod_container_status_restarts_total[5m])
+            )
+
+        # CPU throttle ratio per namespace/pod/container
+        - record: namespace_pod_container:cpu_throttle:ratio5m
+          expr: |
+            sum by (namespace, pod, container) (
+              increase(container_cpu_cfs_throttled_periods_total{container!=""}[5m])
+            )
+            /
+            sum by (namespace, pod, container) (
+              increase(container_cpu_cfs_periods_total{container!=""}[5m])
+            )
+
+        # Memory utilization ratio (working set / limit)
+        - record: namespace_pod_container:memory_utilization:ratio
+          expr: |
+            sum by (namespace, pod, container) (
+              container_memory_working_set_bytes{container!=""}
+            )
+            /
+            sum by (namespace, pod, container) (
+              kube_pod_container_resource_limits{resource="memory", container!=""}
+            )

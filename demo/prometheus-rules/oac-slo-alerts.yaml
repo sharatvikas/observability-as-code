@@ -1,0 +1,128 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: oac-slo-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus
+    app.kubernetes.io/part-of: observability-as-code
+spec:
+  ##
+  ## Multi-window, multi-burn-rate SLO alerting.
+  ## Based on the Google SRE Workbook chapter 5 approach.
+  ##
+  ## For a 99.9% SLO (30-day error budget = 43.2 minutes):
+  ##   - 2% budget burn in 1h   → page immediately (1h window)
+  ##   - 5% budget burn in 6h   → page urgently    (6h window)
+  ##   - 10% budget burn in 3d  → ticket           (3d window)
+  ##
+  ## Burn rate thresholds are calculated as:
+  ##   burn_rate = (1 - SLO) * window / alert_window
+  ##
+  groups:
+    - name: slo.availability
+      interval: 30s
+      rules:
+        ##
+        ## SLO: 99.9% availability (0.1% error budget)
+        ##
+
+        # Page: fast burn — 2% budget consumed in 1h (burn rate 14.4x)
+        - alert: SLOAvailabilityFastBurn
+          expr: |
+            (
+              job:request_error_rate:ratio_rate1h{job=~"payments-api|checkout-api|auth-api"} > (14.4 * 0.001)
+            ) and (
+              job:request_error_rate:ratio_rate5m{job=~"payments-api|checkout-api|auth-api"} > (14.4 * 0.001)
+            )
+          labels:
+            severity: critical
+            category: slo
+            window: "1h"
+          annotations:
+            summary: "{{ $labels.job }} SLO fast burn — page immediately"
+            description: >
+              {{ $labels.job }} 1h error rate is {{ $value | humanizePercentage }} —
+              above the 14.4x fast-burn threshold (1.44%). At this rate, the monthly
+              99.9% SLO budget will be exhausted in under 2 hours.
+            runbook: "https://runbooks.internal/slo/fast-burn"
+            dashboard: "https://grafana.internal/d/slo-overview?var-job={{ $labels.job }}"
+
+        # Page: slow burn — 5% budget consumed in 6h (burn rate 6x)
+        - alert: SLOAvailabilitySlowBurn
+          expr: |
+            (
+              job:request_error_rate:ratio_rate6h{job=~"payments-api|checkout-api|auth-api"} > (6 * 0.001)
+            ) and (
+              job:request_error_rate:ratio_rate30m{job=~"payments-api|checkout-api|auth-api"} > (6 * 0.001)
+            )
+          labels:
+            severity: warning
+            category: slo
+            window: "6h"
+          annotations:
+            summary: "{{ $labels.job }} SLO slow burn — investigate"
+            description: >
+              {{ $labels.job }} is burning error budget at a sustained elevated rate.
+              Error budget will be exhausted in ~5 days at this rate.
+            runbook: "https://runbooks.internal/slo/slow-burn"
+            dashboard: "https://grafana.internal/d/slo-overview?var-job={{ $labels.job }}"
+
+        # Ticket: budget exhaustion on current trajectory (3d window)
+        - alert: SLOAvailabilityBudgetLow
+          expr: |
+            job:request_error_rate:ratio_rate3d{job=~"payments-api|checkout-api|auth-api"} > (1 * 0.001)
+          for: 1h
+          labels:
+            severity: info
+            category: slo
+            window: "3d"
+          annotations:
+            summary: "{{ $labels.job }} SLO error budget will be exhausted this month"
+            description: >
+              {{ $labels.job }} 3-day error rate exceeds the 99.9% SLO threshold.
+              Create a ticket to investigate and fix root causes before month end.
+
+    - name: slo.latency
+      interval: 30s
+      rules:
+        ##
+        ## SLO: 95% of requests complete under 200ms
+        ## Error budget: 5% of requests may exceed 200ms
+        ##
+
+        - alert: SLOLatencyFastBurn
+          expr: |
+            (
+              job:request_latency_above_slo:ratio_rate1h{job=~"payments-api|checkout-api"} > (14.4 * 0.05)
+            ) and (
+              job:request_latency_above_slo:ratio_rate5m{job=~"payments-api|checkout-api"} > (14.4 * 0.05)
+            )
+          labels:
+            severity: critical
+            category: slo
+            window: "1h"
+          annotations:
+            summary: "{{ $labels.job }} latency SLO fast burn"
+            description: >
+              {{ $labels.job }} is exceeding the 200ms latency threshold at
+              {{ $value | humanizePercentage }} of requests — burning latency error budget fast.
+            runbook: "https://runbooks.internal/slo/latency-burn"
+
+        - alert: SLOLatencySlowBurn
+          expr: |
+            (
+              job:request_latency_above_slo:ratio_rate6h{job=~"payments-api|checkout-api"} > (6 * 0.05)
+            ) and (
+              job:request_latency_above_slo:ratio_rate30m{job=~"payments-api|checkout-api"} > (6 * 0.05)
+            )
+          labels:
+            severity: warning
+            category: slo
+            window: "6h"
+          annotations:
+            summary: "{{ $labels.job }} latency SLO slow burn"
+            description: >
+              {{ $labels.job }} is exceeding the 200ms latency SLO at a sustained rate.
+              Investigate query performance, database, or downstream service latency.
+            runbook: "https://runbooks.internal/slo/latency-burn"

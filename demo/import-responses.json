@@ -1,0 +1,29 @@
+[
+  {
+    "folderUid": "",
+    "id": 3276026956578816,
+    "slug": "service-golden-signals-red",
+    "status": "success",
+    "uid": "service-golden-signals",
+    "url": "/d/service-golden-signals/service-golden-signals-red",
+    "version": 1
+  },
+  {
+    "folderUid": "",
+    "id": 3276027527004160,
+    "slug": "kubernetes-cluster-health",
+    "status": "success",
+    "uid": "kubernetes-cluster-health",
+    "url": "/d/kubernetes-cluster-health/kubernetes-cluster-health",
+    "version": 1
+  },
+  {
+    "folderUid": "",
+    "id": 3276027665416192,
+    "slug": "slo-error-budget",
+    "status": "success",
+    "uid": "slo-error-budget",
+    "url": "/d/slo-error-budget/slo-error-budget",
+    "version": 1
+  }
+]

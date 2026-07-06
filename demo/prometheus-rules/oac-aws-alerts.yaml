@@ -1,0 +1,147 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: oac-aws-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus
+    app.kubernetes.io/part-of: observability-as-code
+spec:
+  groups:
+    - name: aws.alb
+      interval: 60s
+      rules:
+        - alert: ALBHighErrorRate
+          expr: |
+            sum by (load_balancer) (
+              rate(aws_applicationelb_httpcode_target_5_xx_count_sum[5m])
+            )
+            /
+            sum by (load_balancer) (
+              rate(aws_applicationelb_request_count_sum[5m])
+            ) * 100 > 5
+          for: 5m
+          labels:
+            severity: warning
+            category: aws
+          annotations:
+            summary: "ALB {{ $labels.load_balancer }} has >5% 5xx error rate"
+            description: >
+              ALB {{ $labels.load_balancer }} is returning {{ $value | humanize }}% 5xx errors.
+              Check target group health, application logs, and recent deployments.
+            runbook: "https://runbooks.internal/aws/alb-errors"
+
+        - alert: ALBHighLatency
+          expr: |
+            aws_applicationelb_target_response_time_p99_sum{} > 1
+          for: 10m
+          labels:
+            severity: warning
+            category: aws
+          annotations:
+            summary: "ALB {{ $labels.load_balancer }} P99 latency > 1s"
+            description: >
+              ALB {{ $labels.load_balancer }} P99 target response time is {{ $value | humanize }}s.
+              Investigate backend service performance.
+
+    - name: aws.rds
+      interval: 60s
+      rules:
+        - alert: RDSHighCPU
+          expr: aws_rds_cpuutilization_average > 80
+          for: 15m
+          labels:
+            severity: warning
+            category: aws
+          annotations:
+            summary: "RDS {{ $labels.dbinstance_identifier }} CPU > 80%"
+            description: >
+              RDS instance {{ $labels.dbinstance_identifier }} CPU at {{ $value | humanize }}%
+              for 15+ minutes. Check for long-running queries or missing indexes.
+            runbook: "https://runbooks.internal/aws/rds-high-cpu"
+
+        - alert: RDSLowFreeStorageSpace
+          expr: aws_rds_free_storage_space_average < 10737418240  # 10GB
+          for: 5m
+          labels:
+            severity: warning
+            category: aws
+          annotations:
+            summary: "RDS {{ $labels.dbinstance_identifier }} free storage < 10GB"
+            description: >
+              RDS instance {{ $labels.dbinstance_identifier }} has
+              {{ $value | humanize1024 }}B free storage. Expand storage or clean up data.
+            runbook: "https://runbooks.internal/aws/rds-storage"
+
+        - alert: RDSHighDatabaseConnections
+          expr: |
+            aws_rds_database_connections_average
+            /
+            aws_rds_database_connections_average offset 1d > 2
+          for: 10m
+          labels:
+            severity: warning
+            category: aws
+          annotations:
+            summary: "RDS {{ $labels.dbinstance_identifier }} connections doubled vs yesterday"
+            description: >
+              Connection count is 2x yesterday's baseline. Check for connection pool leaks
+              or unexpected traffic spike.
+
+        - alert: RDSReplicationLag
+          expr: aws_rds_replica_lag_average > 30
+          for: 5m
+          labels:
+            severity: warning
+            category: aws
+          annotations:
+            summary: "RDS read replica {{ $labels.dbinstance_identifier }} lag > 30s"
+            description: >
+              Read replica {{ $labels.dbinstance_identifier }} is {{ $value | humanize }}s
+              behind the primary. Read queries may return stale data.
+            runbook: "https://runbooks.internal/aws/rds-replica-lag"
+
+    - name: aws.ec2
+      interval: 60s
+      rules:
+        - alert: EC2StatusCheckFailed
+          expr: aws_ec2_status_check_failed_sum > 0
+          for: 5m
+          labels:
+            severity: critical
+            category: aws
+          annotations:
+            summary: "EC2 instance {{ $labels.instance_id }} status check failed"
+            description: >
+              Instance {{ $labels.instance_id }} has failed status checks.
+              May require stop/start or instance retirement.
+            runbook: "https://runbooks.internal/aws/ec2-status-check"
+
+    - name: aws.sqs
+      interval: 60s
+      rules:
+        - alert: SQSQueueDepthHigh
+          expr: aws_sqs_approximate_number_of_messages_visible_sum > 10000
+          for: 15m
+          labels:
+            severity: warning
+            category: aws
+          annotations:
+            summary: "SQS queue {{ $labels.queue_name }} has >10k messages"
+            description: >
+              Queue {{ $labels.queue_name }} has {{ $value | humanize }} messages.
+              Consumer may be down or too slow.
+            runbook: "https://runbooks.internal/aws/sqs-depth"
+
+        - alert: SQSDeadLetterQueueMessages
+          expr: aws_sqs_approximate_number_of_messages_visible_sum{queue_name=~".*dlq.*|.*dead.*"} > 0
+          for: 5m
+          labels:
+            severity: warning
+            category: aws
+          annotations:
+            summary: "Dead letter queue {{ $labels.queue_name }} has messages"
+            description: >
+              {{ $value | humanize }} messages in dead letter queue {{ $labels.queue_name }}.
+              Investigate failed message processing.
+            runbook: "https://runbooks.internal/aws/sqs-dlq"

@@ -1,0 +1,105 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: oac-slo-recording
+  namespace: monitoring
+  labels:
+    release: kube-prometheus
+    app.kubernetes.io/part-of: observability-as-code
+spec:
+  ##
+  ## Recording rules for SLO calculations.
+  ## Pre-computing these reduces dashboard query load and enables
+  ## multi-window burn rate alerting without expensive range queries.
+  ##
+  groups:
+    - name: slo.recording
+      interval: 30s
+      rules:
+        ## ── Availability: error ratio by window ──────────────────────────────
+
+        - record: job:request_error_rate:ratio_rate5m
+          expr: |
+            sum by (job) (rate(http_requests_total{status=~"5.."}[5m]))
+            /
+            sum by (job) (rate(http_requests_total[5m]))
+
+        - record: job:request_error_rate:ratio_rate30m
+          expr: |
+            sum by (job) (rate(http_requests_total{status=~"5.."}[30m]))
+            /
+            sum by (job) (rate(http_requests_total[30m]))
+
+        - record: job:request_error_rate:ratio_rate1h
+          expr: |
+            sum by (job) (rate(http_requests_total{status=~"5.."}[1h]))
+            /
+            sum by (job) (rate(http_requests_total[1h]))
+
+        - record: job:request_error_rate:ratio_rate6h
+          expr: |
+            sum by (job) (rate(http_requests_total{status=~"5.."}[6h]))
+            /
+            sum by (job) (rate(http_requests_total[6h]))
+
+        - record: job:request_error_rate:ratio_rate3d
+          expr: |
+            sum by (job) (rate(http_requests_total{status=~"5.."}[3d]))
+            /
+            sum by (job) (rate(http_requests_total[3d]))
+
+        ## ── Latency: fraction of requests above SLO threshold (200ms) ────────
+
+        - record: job:request_latency_above_slo:ratio_rate5m
+          expr: |
+            1 - (
+              sum by (job) (rate(http_request_duration_seconds_bucket{le="0.2"}[5m]))
+              /
+              sum by (job) (rate(http_request_duration_seconds_count[5m]))
+            )
+
+        - record: job:request_latency_above_slo:ratio_rate30m
+          expr: |
+            1 - (
+              sum by (job) (rate(http_request_duration_seconds_bucket{le="0.2"}[30m]))
+              /
+              sum by (job) (rate(http_request_duration_seconds_count[30m]))
+            )
+
+        - record: job:request_latency_above_slo:ratio_rate1h
+          expr: |
+            1 - (
+              sum by (job) (rate(http_request_duration_seconds_bucket{le="0.2"}[1h]))
+              /
+              sum by (job) (rate(http_request_duration_seconds_count[1h]))
+            )
+
+        - record: job:request_latency_above_slo:ratio_rate6h
+          expr: |
+            1 - (
+              sum by (job) (rate(http_request_duration_seconds_bucket{le="0.2"}[6h]))
+              /
+              sum by (job) (rate(http_request_duration_seconds_count[6h]))
+            )
+
+        ## ── Request rate ──────────────────────────────────────────────────────
+
+        - record: job:request_rate:rate5m
+          expr: |
+            sum by (job) (rate(http_requests_total[5m]))
+
+        - record: job:request_rate:rate1h
+          expr: |
+            sum by (job) (rate(http_requests_total[1h]))
+
+        ## ── Error budget remaining (30-day window, 99.9% SLO) ───────────────
+
+        - record: job:error_budget_remaining:ratio_rate30d
+          expr: |
+            1 - (
+              (
+                sum by (job) (increase(http_requests_total{status=~"5.."}[30d]))
+                /
+                sum by (job) (increase(http_requests_total[30d]))
+              ) / 0.001
+            )
