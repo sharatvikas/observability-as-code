@@ -34,6 +34,22 @@ Production-ready dashboard JSON in `dashboards/json/` (provisioned automatically
 
 All three dashboards share a `datasource` template variable, cross-link to each other, use real PromQL against the recording rules in this repo, and annotate firing alerts from the `ALERTS` metric.
 
+#### Dashboards in action
+
+These are live captures from Grafana after importing this repo's JSON into a `kube-prometheus` stack (see [`demo/`](demo/) for the one-command import), with a small instrumented workload driving traffic:
+
+**Service Golden Signals (RED)** — real request rate, error ratio, latency, and availability, broken down by service and status class:
+
+![Service Golden Signals RED dashboard](docs/images/golden-signals.png)
+
+**SLO / Error Budget** — per-service availability against a 99.9% target, error-budget gauges (note `payments-api` burning through its budget), and multi-window fast/slow burn-rate panels straight from the recording rules:
+
+![SLO error-budget dashboard](docs/images/slo-budget.png)
+
+**Kubernetes Cluster Health** — node CPU/memory/disk and cluster capacity from real node-exporter and kube-state-metrics data:
+
+![Kubernetes cluster health dashboard](docs/images/cluster-health.png)
+
 ### 2. Alert Rules Library (`alerts/`)
 
 Production-tested Prometheus alerting rules organized by domain:
