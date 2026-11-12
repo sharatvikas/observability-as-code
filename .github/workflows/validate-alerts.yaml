@@ -21,7 +21,7 @@ jobs:
     name: promtool lint & unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Prometheus
         run: |
@@ -55,7 +55,7 @@ jobs:
     name: amtool check-config
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Alertmanager
         run: |
@@ -70,7 +70,7 @@ jobs:
     name: Dashboard JSON validation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Validate dashboard JSON structure
         run: |
@@ -93,7 +93,7 @@ jobs:
     name: Jsonnet dashboard lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install jsonnet
         run: |
@@ -116,7 +116,7 @@ jobs:
     name: SLO alert coverage check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check required alert groups exist
         run: |
